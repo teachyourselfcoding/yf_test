@@ -1,0 +1,237 @@
+parameters:
+  - name: invoiceId
+    optional: false
+  - name: description
+    optional: false
+  - name: amount
+    optional: false
+  - name: currencyCode
+    optional: false
+  - name: disputeCaseId
+    optional: false
+
+action_groups:
+  # Stage 0: Initialise variables, and get dispute case
+  - actions:
+
+    #DEBUG output - !disable inside util/debug_msg.yaml!
+    - type: dialog-function 
+      name: agent/helper/debug_msg
+      parameters:
+        - name: message
+          value: "Agent invoked Joule Dialog Function: agent/agentTools/create_credit_memo_process_dc" 
+    #//DEBUG output -
+
+    - type: set-variables
+      variables:
+        - name: disputeCaseExists
+          value: false
+        - name: caseSystemStatusValid
+          value: false
+        - name: disputeCaseSetInProcess
+          value: false
+        - name: billingRequestCreated
+          value: false
+        - name: disputeStatusName
+          value: null
+        - name: disputeSystemStatus
+          value: null
+        - name: creditMemoId
+          value: null
+        - name: creditMemoStatus
+          value: null
+        - name: caseNoteStatus
+          value: null
+        - name: wrappedFunctionResponse
+          value: {
+            "calledFunctionName": "create_credit_memo_process_dc",
+            "innerFunctions": [
+              {
+                "functionName": "get_dispute_details",
+                "isCalled": false
+              },
+              {
+                "functionName": "set_dispute_case_processing",
+                "isCalled": false
+              },
+              {
+                "functionName": "create_billing_request",
+                "isCalled": false
+              },
+              {
+                "functionName": "set_billing_request_checking",
+                "isCalled": false
+              },
+              {
+                "functionName": "create_dispute_case_note",
+                "isCalled": false
+              }
+            ]
+          }
+    - type: dialog-function
+      name: agent/util/get_dispute_details
+      parameters:
+        - name: disputeCaseId
+          value: <? disputeCaseId ?>
+        - name: suppress_success_message
+          value: "true"
+      result_variable: dispute_details
+    - type: set-variables
+      scripting_type: handlebars
+      variables:
+        - name: wrappedFunctionResponse
+          value: "{{ setValue wrappedFunctionResponse 'innerFunctions[0]' dispute_details.wrappedFunctionResponse }}"
+
+  # Stage 1: Get dispute case -- Fail
+  - condition: dispute_details.value == null
+    actions:
+    - type: status-update
+      message: "Failed to retrieve Dispute case <? disputeCaseId ?>"
+
+  # Stage 1: Get dispute case -- Success
+  - condition: dispute_details.value != null
+    actions:
+    - type: set-variables
+      variables:
+        - name: disputeCaseExists
+          value: true
+        - name: disputeStatusName
+          value: <? dispute_details.value.CaseStatusName ?>
+        - name: disputeSystemStatus
+          value: <? dispute_details.value.CaseSystemStatus ?>
+        - name: disputeCaseUUID
+          value: <? dispute_details.value.CaseUUID ?>
+
+  # Stage 1a: Check Case Status -- Fail because system status is already Closed(007), Confirmed(008), or Voided/Deleted/Cancelled(009)
+  - condition: disputeCaseExists && !(disputeSystemStatus == '001' || disputeSystemStatus == '002')
+    actions:
+    - type: status-update
+      message: "Dispute case <? disputeCaseId ?> cannot be processed, it is Closed or Voided."
+
+  # Stage 1a: Check Case Status -- Success because system status is New (001) or Being Processed (002), proceed to update status to being processed (002)
+  - condition: disputeCaseExists && (disputeSystemStatus == '001' || disputeSystemStatus == '002')
+    actions:
+    - type: set-variables
+      variables:
+        - name: caseSystemStatusValid
+          value: true
+    - type: dialog-function
+      name: agent/util/set_dispute_case_processing
+      parameters:
+        - name: disputeCaseUUID
+          value: <? disputeCaseUUID ?>
+      result_variable: dispute_case_update_result
+    - type: set-variables
+      scripting_type: handlebars
+      variables:
+        - name: wrappedFunctionResponse
+          value: "{{ setValue wrappedFunctionResponse 'innerFunctions[1]' dispute_case_update_result.wrappedFunctionResponse }}"
+
+  # Stage 2: Update Case Status to Being Processed -- Fail
+  - condition: caseSystemStatusValid && (dispute_case_update_result.disputeCaseStatus == null || dispute_case_update_result.disputeCaseStatusName == null || dispute_case_update_result.disputeCaseSystemStatus == null)
+    actions:
+    - type: status-update
+      message: "Dispute case <? disputeCaseId ?> cannot be processed as it cannot be set to 'Being Processed' status."
+
+  # Stage 2: Update Case Status to Being Processed -- Success and attempt to create billing request
+  - condition: caseSystemStatusValid && dispute_case_update_result.disputeCaseSystemStatus == '002'
+    actions:
+    - type: set-variables
+      variables:
+      - name: disputeCaseSetInProcess
+        value: true
+      - name: disputeStatusName
+        value: <? dispute_case_update_result.disputeCaseStatusName ?>
+      - name: disputeSystemStatus
+        value: <? dispute_case_update_result.disputeCaseSystemStatus ?>
+        
+    - type: status-update
+      message: "Dispute Case <? disputeCaseId ?> set to 'Being Processed'"
+
+    - type: dialog-function
+      name: agent/util/create_billing_request
+      parameters:
+        - name: invoiceId
+          value: <? invoiceId ?>
+        - name: description
+          value: "Billing request for Dispute case <? disputeCaseId ?>"
+        - name: amount
+          value: <? amount ?>
+        - name: currencyCode
+          value: <? currencyCode ?>
+        - name: disputeCaseID
+          value: <? disputeCaseId ?>
+      result_variable: billing_request_result
+    - type: set-variables
+      scripting_type: handlebars
+      variables:
+        - name: wrappedFunctionResponse
+          value: "{{ setValue wrappedFunctionResponse 'innerFunctions[2]' billing_request_result.wrappedFunctionResponse }}"
+
+  # Stage 3: Create Billing Request -- Fail
+  - condition: disputeCaseSetInProcess && billing_request_result.creditMemoId == null
+    actions:
+    - type: status-update
+      message: "An error occured while creating a Credit memo for Dispute case <? disputeCaseId ?>"
+
+  # Stage 3: Create Billing Request -- Success and try to set status to for checking
+  - condition: disputeCaseSetInProcess && billing_request_result.creditMemoId != null
+    actions:
+    - type: set-variables
+      variables:
+      - name: billingRequestCreated
+        value: true
+      - name: creditMemoId
+        value: <? billing_request_result.creditMemoId ?>
+      - name: creditMemoStatus
+        value: <? billing_request_result.creditMemoStatus ?>
+    - type: dialog-function
+      name: agent/util/set_billing_request_checking
+      parameters:
+        - name: creditMemoId
+          value: <? creditMemoId ?>
+      result_variable: billing_req_status
+    - type: set-variables
+      scripting_type: handlebars
+      variables:
+        - name: wrappedFunctionResponse
+          value: "{{ setValue wrappedFunctionResponse 'innerFunctions[3]' billing_req_status.wrappedFunctionResponse }}"
+
+  # Stage 4: Billing request set to for checking - Success
+  - condition: billingRequestCreated && billing_req_status.creditMemoStatus != null
+    actions:
+    - type: set-variables
+      variables:
+      - name: creditMemoStatus
+        value: <? billing_req_status.creditMemoStatus ?>
+
+  # Stage 5: Attach note reporting the created billing request on the dispute case
+  - condition: billingRequestCreated
+    actions:
+    - type: dialog-function
+      name: agent/util/create_dispute_case_note
+      parameters:
+        - name: disputeCaseUUID
+          value: <? disputeCaseUUID ?>
+        - name: caseNoteText
+          value: "Credit Memo <? creditMemoId ?> created. Associated Invoice: <? invoiceId ?>, Amount: <? amount ?> <? currencyCode ?>"
+      result_variable: case_note_result
+    - type: set-variables
+      variables:
+        - name: caseNoteStatus
+          value: <? case_note_result.status_code ?>
+    - type: set-variables
+      scripting_type: handlebars
+      variables:
+        - name: wrappedFunctionResponse
+          value: "{{ setValue wrappedFunctionResponse 'innerFunctions[4]' case_note_result.wrappedFunctionResponse }}"
+
+result:
+  mimeType: "application/json"
+  data:
+    disputeCaseId: <? disputeCaseId ?>
+    disputeStatusName: <? disputeStatusName ?>
+    creditMemoId: <? creditMemoId ?>
+    creditMemoStatus: <? creditMemoStatus ?>
+    caseNoteStatus: <? caseNoteStatus ?>
+  wrappedFunctions: <? wrappedFunctionResponse ?>

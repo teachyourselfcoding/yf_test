@@ -1,0 +1,196 @@
+parameters:
+  - name: disputeCaseId
+    optional: false
+  - name: lastAgentQuestionHistoryId  #response from last step to provide historyId for continueMessage
+    optional: true  
+  - name: lastAgentProcessedDisputeCaseId #disputeCaseId from last agent step to check if HITL answer is exactly for that Dispute Case
+    optional: true
+  - name: approval  #user input for HITL mapped into answer to agent
+    optional: true
+  - name: agent_id
+    optional: true
+
+action_groups:
+
+  # DEBUG, log input parameters
+  - actions:
+      - type: dialog-function 
+        name: agent/helper/debug_msg
+        parameters:
+          - name: message
+            value: "\n\
+                    \n\
+                    ```\n\
+                    Input:  \n\
+                    - disputeCaseId: <? disputeCaseId ?>\n\
+                    - agent_id: <? agent_id ?>\n\
+                    - lastAgentProcessedDisputeCaseId: <? lastAgentProcessedDisputeCaseId ?>\n\
+                    - lastAgentQuestionHistoryId:  <? lastAgentQuestionHistoryId ?>\n\
+                    - $transient.input.text.raw: <? $transient.input.text.raw ?>  \n\ 
+                    - approval: <? approval ?>  \n\
+                    ```\n\
+                    "
+  #//DEBUG output -
+  
+  - condition: agent_id == null || agent_id == ""
+    actions:
+      - type: set-variables
+        variables:
+        - name: agent_id
+          value: "<? $system_context.systems.?[system_type == 'unified.agent.system'].get(0).properties.get(0).agent_id ?>" #get agent_id from system context
+
+  # forget last Agent step context, in case value of slot disputeCaseId has changed -> new Dispute Case, switch to new agent chat / sendMessage
+  - condition: disputeCaseId != lastAgentProcessedDisputeCaseId && lastAgentProcessedDisputeCaseId != null && lastAgentQuestionHistoryId != null
+    actions:
+
+      #DEBUG output - !disable inside agent/helper/debug_msg.yaml!
+      - type: dialog-function 
+        name: agent/helper/debug_msg
+        parameters:
+          - name: message
+            value: "New Dispute Case: **<? disputeCaseId ?>**,  \n\
+                    old ID was <? lastAgentProcessedDisputeCaseId ?>,  \n\
+                    Clearing buffered historyId of last agent question ..."
+      #//DEBUG output -
+
+      - type: set-variables #clear context of last HITL qstn due to different dispute case
+        variables:         
+        - name: lastAgentQuestionHistoryId
+          value: null
+
+  # no HITL -> sendMessage with fixed query
+  - condition: (lastAgentQuestionHistoryId == null)
+    actions:
+      - type: dialog-function
+        name: agent/helper/prepare_schema
+        result_variable: agentOutputSchema
+      - type: set-variables  
+        variables:         
+        - name: path
+          value: "sendMessage"
+
+      - type: set-variables  
+        variables:         
+        - name: request_body
+          value:  
+            msg:  "Please help me resolve dispute case <? disputeCaseId ?>"
+            destination: "AC_callback_api"
+            outputFormat: "JSON"
+            outputFormatOptions: "<? agentOutputSchema.schema ?>"
+            
+  # HITL -> continueMessage with user input
+  - condition: lastAgentQuestionHistoryId != null  
+    actions:
+      - type: set-variables  
+        variables:
+        - name: path
+          value: "continueMessage"
+        - name: request_body
+          value: 
+            observation: "<? approval ?>"
+#            observation: "<? $transient.input.text.raw ?>"
+            historyId: "<? lastAgentQuestionHistoryId ?>"
+            destination: "AC_callback_api"
+        - name: lastAgentQuestionHistoryId  #clear context (historyId) of last HITL qstn after use
+          value: null
+
+  - actions:
+
+      - type: status-update
+        message: "Analyzing dispute case ..."
+
+      #DEBUG output - !disable inside agent/helper/debug_msg.yaml!
+      - type: dialog-function 
+        name: agent/helper/debug_msg
+        parameters:
+          - name: "outputType"
+            value: "status-update"
+          - name: message
+            value: "Calling Agent API on path: <? path ?>"
+
+      - type: dialog-function 
+        name: agent/helper/debug_msg
+        parameters:
+          - name: message
+            value: "**Request** to agent api:  \n\
+                   **path:** <? path ?>  \n\
+                   **body:**  \n\
+                   \n\
+                    ```json \n\
+                   <? request_body ?> \n\
+                    ```\n\
+                    \n\
+                    "
+
+      #//DEBUG output -
+    
+      - type: agent-request # only spel can be used in api-requests
+        method: POST
+        system_alias: APIAGENTCALLBACK
+        agent_id: "<? agent_id ?>"
+        #agent_id: "<? $system_context.systems.?[system_type == 'unified.agent.system'].get(0).properties.get(0).agent_id ?>"  #get agent_id from system context
+        path: "<? path ?>"
+        headers:
+          Content-Type: application/json
+        body: <? request_body ?>
+        result_variable: "apiResponse"
+
+  - actions:
+      #DEBUG output - !disable inside agent/helper/debug_msg.yaml!
+      - type: dialog-function 
+        name: agent/helper/debug_msg
+        parameters:
+          - name: message
+            value: "**Response** from agent api:  \n\
+                    **Headers:** <? apiResponse.headers ?>  \n\
+                    **body:**  \n\
+                    \n\
+                    ```json \n\
+                    <? apiResponse.body ?> \n\
+                    ```\n\
+                    \n\
+                    "
+      #//DEBUG output -
+
+  - condition: apiResponse != null && apiResponse.body != null && apiResponse.body.type != null && apiResponse.body.type == "answerForUser" 
+    actions:
+      - type: set-variables
+        variables:
+        - name: agentResponseHistoryId  #reset the trigger for questionForUser
+          value: null
+
+      - type: set-variables
+        variables:
+        - name: disputeDetails  
+          value: "<? apiResponse.body.agentMessage ?: 'Error: missing agentMessage in agent response' ?>" #requested outputFormat JSON, agentMessage contains json 
+
+      - type: dialog-function
+        name: agent/helper/outputDisputeCaseProcessing
+        parameters:
+          - name: disputeCaseId
+            value: "<? disputeCaseId ?>"
+          - name: disputeDetails
+            value: "<? disputeDetails ?>"
+
+
+  - condition: apiResponse != null && apiResponse.body != null && apiResponse.body.type != null && apiResponse.body.type == "questionForUser"
+    actions:
+      - type: dialog-function
+        name: agent/helper/outputQuestionForUser
+        parameters:
+          - name: agentQuestionResponseBody
+            value: "<? apiResponse.body ?>"
+          - name: disputeCaseId
+            value: "<? disputeCaseId ?>"
+
+      - type: set-variables
+        variables:
+        - name: agentResponseHistoryId  
+          value: "<? apiResponse.body.responseHistoryId ?: '' ?>"
+
+
+result: # functions return a map with the defined variables
+  msg: <? apiResponse.body.agentMessage ?> # response "text" from agent / json
+  agentQuestionHistoryId: <? agentResponseHistoryId ?>
+  agentProcessedDisputeCaseId: <? disputeCaseId ?>
+  agent_id: "<? agent_id ?>"

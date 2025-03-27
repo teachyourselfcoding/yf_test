@@ -1,0 +1,178 @@
+parameters:
+  - name: invoiceId
+    optional: false
+
+action_groups:
+  - actions:
+    # Stage 0: Initialise variables and attempt to get invoice line items
+    - type: set-variables
+      variables:
+        - name: number_of_results
+          value: null
+        - name: invoice_line_items
+          value: null
+        - name: wrappedFunctionResponse
+          value: {
+            "functionName": "get_invoice_line_items",
+            "isCalled": true,
+              "hasError": false,
+              "messages": [],
+              "errorMessages": []
+          }
+        - name: messages
+          value: []
+        - name: errorMessages
+          value: []
+        - name: hasError
+          value: false
+    - type: api-request
+      method: GET
+      system_alias: S4HANA_PCE_SSO
+      path: "/sap/opu/odata4/sap/api_cainvoicingdocument/srvd_a2x/sap/cainvoicingdocument/0001/CAInvcgDocument/<? invoiceId ?>/_CAInvcgDocItem"
+      result_variable: result_invoice_line_items
+
+  # Stage 1: Fetch Invoice Lineitems - Fail (API error)
+
+  # Handle all other status codes
+  - condition: result_invoice_line_items.status_code != 200
+    actions:
+      - type: set-variables
+        variables:
+          - name: msg
+            value: "Internal Server Error"
+          - name: errorMessages
+            value: <? errorMessages.append(msg) ?>
+          - name: hasError
+            value: true
+      - type: message
+        scripting_type: handlebars
+        message:
+          type: illustrated_message
+          content:
+            illustration_name: "Connection"
+            title: "An error occurred while retrieving invoice data."
+            subtitle: "Please try again later."
+
+  # Stage 1: Fetch Invoice Lineitems - Success, set number of results
+  - condition: result_invoice_line_items.status_code == 200
+    actions:
+      - type: set-variables
+        variables:
+          - name: number_of_results
+            value: <? result_invoice_line_items.body.value.size() ?>
+
+  # Stage 1a: Fetch Invoice Lineitems - No line items found
+  - condition: number_of_results == 0
+    actions:
+      - type: set-variables
+        variables:
+          - name: msg
+            value: "There was no line item found for Invoice <? invoiceId ?>."
+          - name: messages
+            value: <? messages.append(msg) ?>
+      - type: status-update
+        message: <? msg ?>          
+
+  # Stage 1a: Fetch Invoice Lineitems - No line items found
+  - condition: number_of_results != null && number_of_results == 1 && result_invoice_line_items.body.value[0].CAInvcgDocumentItemType == '0INVBILL'
+    actions:
+      - type: set-variables
+        variables:
+          - name: msg
+            value: "There was no tax line item found for Invoice <? invoiceId ?>."
+          - name: messages
+            value: <? messages.append(msg) ?>
+      - type: status-update
+        message: <? msg ?>          
+
+  # Stage 1a: Fetch Invoice Lineitems - No line items found
+  - condition: number_of_results != null && number_of_results == 1 && result_invoice_line_items.body.value[0].CAInvcgDocumentItemType == '0TAXITEM'
+    actions:
+      - type: set-variables
+        variables:
+          - name: msg
+            value: "There was no invoice line item found for the Invoice <? invoiceId ?>, only a tax line item."
+          - name: messages
+            value: <? messages.append(msg) ?>
+      - type: status-update
+        message: <? msg ?>          
+
+  # Stage 1a: Fetch Invoice Lineitems - More than 2 line items not supported
+  - condition: number_of_results != null && number_of_results > 2
+    actions:
+      - type: set-variables
+        variables:
+          - name: msg
+            value: "Resolution of Dispute cases with more than one (non-tax) invoice line item is not yet supported."
+          - name: errorMessages
+            value: <? errorMessages.append(msg) ?>
+          - name: hasError
+            value: true
+      - type: status-update
+        message: <? msg ?>          
+
+    # Stage 1a: Fetch Invoice Lineitems - 2 line items found
+  - condition: number_of_results == 2 && result_invoice_line_items.body.value[0].CAInvcgDocumentItemType == '0INVBILL' && result_invoice_line_items.body.value[1].CAInvcgDocumentItemType == '0TAXITEM'
+    actions:
+      - type: set-variables
+        scripting_type: handlebars
+        variables:
+          - name: invoice_line_items
+            value: >
+                {
+                  "documentDueDate": "{{result_invoice_line_items.body.value.[0].CAItemPeriodStartDate}}",
+                  "contractId": "{{result_invoice_line_items.body.value.[0].CAContract}}",
+                  "invoiceAmount": "{{result_invoice_line_items.body.value.[0].CAAmountInTransactionCurrency}}",
+                  "invoiceCurrency": "{{result_invoice_line_items.body.value.[0].TransactionCurrency}}",
+                  "taxRateInPercent": "{{#if result_invoice_line_items.body.value.[1].CATaxRateInPercent}}{{result_invoice_line_items.body.value.[1].CATaxRateInPercent}}{{else}}0{{/if}}"
+                }
+      - type: set-variables
+        variables:
+          - name: msg
+            value: "Found exactly one invoice line item and one tax item for Invoice <? invoiceId ?>"
+          - name: messages
+            value: <? messages.append(msg) ?>
+
+  - condition: number_of_results == 2 && result_invoice_line_items.body.value[1].CAInvcgDocumentItemType == '0INVBILL' && result_invoice_line_items.body.value[0].CAInvcgDocumentItemType == '0TAXITEM'
+    actions:
+      - type: set-variables
+        scripting_type: handlebars
+        variables:
+          - name: invoice_lineitems
+            value: >
+                {
+                  "documentDueDate": "{{result_invoice_line_items.body.value.[1].CAItemPeriodStartDate}}",
+                  "contractId": "{{result_invoice_line_items.body.value.[1].CAContract}}",
+                  "invoiceAmount": "{{result_invoice_line_items.body.value.[1].CAAmountInTransactionCurrency}}",
+                  "invoiceCurrency": "{{result_invoice_line_items.body.value.[1].TransactionCurrency}}",
+                  "taxRateInPercent": "{{#if result_invoice_line_items.body.value.[0].CATaxRateInPercent}}{{result_invoice_line_items.body.value.[0].CATaxRateInPercent}}{{else}}0{{/if}}"
+                }
+      - type: set-variables
+        variables:
+          - name: msg
+            value: "Found exactly one invoice line item and one tax item for Invoice <? invoiceId ?>"
+          - name: messages
+            value: <? messages.append(msg) ?>
+
+  - actions:
+      - type: set-variables
+        scripting_type: handlebars
+        variables:
+          - name: wrappedFunctionResponse
+            value: "{{ setValue wrappedFunctionResponse 'hasError' hasError }}"
+      - type: set-variables
+        scripting_type: handlebars
+        variables:
+          - name: wrappedFunctionResponse
+            value: "{{ setValue wrappedFunctionResponse 'messages' messages }}"
+      - type: set-variables
+        scripting_type: handlebars
+        variables:
+          - name: wrappedFunctionResponse
+            value: "{{ setValue wrappedFunctionResponse 'errorMessages' errorMessages }}"
+
+result:
+  status_code: <? result_invoice_line_items.status_code ?>
+  number_of_results: <? number_of_results ?>
+  value: <? invoice_line_items ?>
+  wrappedFunctionResponse: <? wrappedFunctionResponse ?>

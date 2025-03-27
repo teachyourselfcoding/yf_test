@@ -1,0 +1,152 @@
+parameters:
+  - name: disputeCaseId
+    optional: false
+  - name: creditMemoId
+    optional: false
+
+action_groups:
+  - actions:
+
+    #DEBUG output - !disable inside util/debug_msg.yaml!
+    - type: dialog-function 
+      name: agent/helper/debug_msg
+      parameters:
+        - name: message
+          value: "Agent invoked Joule Dialog Function: agent/agentTools/release_credit_memo_close_dc" 
+    #//DEBUG output -
+
+
+    # Stage 0: Initialisation and Attempt to release credit memo
+    - type: set-variables
+      variables:
+        - name: creditMemoReleased
+          value: false
+        - name: disputeCaseExists
+          value: false
+        - name: disputeCaseClosed
+          value: false
+        - name: disputeStatusName
+          value: null
+        - name: creditMemoStatus
+          value: null
+        - name: wrappedFunctionResponse
+          value: {
+            "calledFunctionName": "release_credit_memo_close_dc",
+            "innerFunctions": [
+              {
+                "functionName": "set_billing_request_release",
+                "isCalled": false
+              },
+              {
+                "functionName": "get_dispute_details",
+                "isCalled": false
+              },
+              {
+                "functionName": "set_dispute_case_closed",
+                "isCalled": false
+              }
+            ]
+          }
+    - type: dialog-function
+      name: agent/util/set_billing_request_release
+      parameters:
+        - name: creditMemoId
+          value: <? creditMemoId ?>
+      result_variable: result_release_credit_memo
+    - type: set-variables
+      scripting_type: handlebars
+      variables:
+        - name: wrappedFunctionResponse
+          value: "{{ setValue wrappedFunctionResponse 'innerFunctions[0]' result_release_credit_memo.wrappedFunctionResponse }}"
+
+  # Stage 1: Credit Memo Release -- Failed
+  - condition: result_release_credit_memo.creditMemoStatus != "R"
+    actions:
+      - type: message
+        message:
+          type: illustrated_message
+          content:
+            illustration_name: "Warning"
+            title: "Credit Memo Release Failed"
+            subtitle: "Credit memo <? creditMemoId ?> could not be released."
+
+  # Stage 1: Credit Memo Release -- Success & Get Dispute Details
+  - condition: result_release_credit_memo.creditMemoStatus == "R"
+    actions:
+    - type: set-variables
+      variables:
+        - name: creditMemoReleased
+          value: true
+    - type: dialog-function
+      name: util/get_dispute_details
+      parameters:
+        - name: disputeCaseId
+          value: <? disputeCaseId ?>
+      result_variable: dispute_details
+    - type: set-variables
+      scripting_type: handlebars
+      variables:
+        - name: wrappedFunctionResponse
+          value: "{{ setValue wrappedFunctionResponse 'innerFunctions[1]' dispute_details.wrappedFunctionResponse }}"
+
+  # Stage 2: Get Dispute Details -- Cannot find dispute case
+  - condition: creditMemoReleased && dispute_details.value == null
+    actions:
+    - type: status-update
+      message: "Dispute case <? disputeCaseId ?> could not be found and closed"
+
+  # Stage 2: Get Dispute Details -- Success & Proceed to Close Dispute Case
+  - condition: creditMemoReleased && dispute_details.value != null
+    actions:
+    - type: set-variables
+      variables:
+        - name: disputeCaseExists
+          value: true
+        - name: disputeStatusName
+          value: <? dispute_details.value.CaseStatusName ?>
+    - type: dialog-function
+      name: agent/util/set_dispute_case_closed
+      parameters:
+        - name: disputeCaseUUID
+          value: <? dispute_details.value.CaseUUID ?>
+        - name: disputedCurrency
+          value: <? dispute_details.value.DisputeCaseCurrency ?>
+      result_variable: result_close_dispute
+    - type: set-variables
+      scripting_type: handlebars
+      variables:
+        - name: wrappedFunctionResponse
+          value: "{{ setValue wrappedFunctionResponse 'innerFunctions[2]' result_close_dispute.wrappedFunctionResponse }}"
+
+  # Stage 3: Close Dispute Case -- Failure
+  - condition: disputeCaseExists && result_close_dispute.disputeCaseSystemStatus != '007'
+    actions:
+      - type: message
+        message:
+          type: illustrated_message
+          content:
+            illustration_name: "Error"
+            title: "Failed to Close Dispute Case"
+            subtitle: "Credit memo <? creditMemoId ?> has been released, but the Dispute case <? disputeCaseId ?> could not be closed"
+
+  # Stage 3: Close Dispute Case -- Success
+  - condition: disputeCaseExists && result_close_dispute.disputeCaseSystemStatus == '007'
+    actions:
+      - type: set-variables
+        variables:
+          - name: disputeStatus
+            value: <? result_close_dispute.disputeCaseStatus ?>
+          - name: disputeStatusName
+            value: <? result_close_dispute.disputeCaseStatusName ?>
+      - type: status-update
+        message: "Dispute case <? disputeCaseId ?> has been successfully closed, and Credit memo <? creditMemoId ?> has been released."        
+
+result:
+  mimeType: "application/json"
+  data:
+    disputeCaseId: <? disputeCaseId ?>
+    creditMemoId: <? creditMemoId ?>
+    disputeStatusName: <? disputeStatusName ?>
+    creditMemoStatus: <? creditMemoStatus ?>
+  wrappedFunctions: <? wrappedFunctionResponse ?>
+

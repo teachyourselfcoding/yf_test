@@ -1,0 +1,147 @@
+parameters:
+  - name: BusinessPartner_ui
+    optional: true
+  - name: currency_ui
+    optional: true
+  - name: BusinessPartner
+    optional: true
+  - name: disputeType
+    optional: true
+  - name: disputeCaseCurrency
+    optional: true
+
+action_groups:
+  - condition: BusinessPartner == null || disputeCaseCurrency == null
+    actions:
+      - type: dialog-function
+        name: util/variable_handling
+        parameters:
+          - name: scenario
+            value: "fica_open_credits"
+          - name: BusinessPartner_ui
+            value: <? BusinessPartner_ui ?>
+          - name: BusinessPartner
+            value: <? BusinessPartner ?>
+          - name: currency_ui
+            value: <? currency_ui ?>
+          - name: disputeCaseCurrency
+            value: <? disputeCaseCurrency ?>
+        result_variable: handle_result
+      - type: set-variables
+        variables:
+          - name: BusinessPartner
+            value: <? handle_result.BusinessPartner ?>
+          - name: disputeCaseCurrency
+            value: <? handle_result.disputeCaseCurrency ?>
+
+  - condition: BusinessPartner != null && disputeCaseCurrency != null
+    actions:
+      - type: api-request
+        method: GET
+        system_alias: S4HANA_PCE_SSO
+        path: /sap/opu/odata4/sap/api_cadocumentmanage/srvd_a2x/sap/api_cadocumentmanage/0001/BPItem?%24filter=BusinessPartner%20eq%20%27<? BusinessPartner ?>%27%20and%20CAClearingStatus%20eq%20''%20and%20CAClearingRestrictionCode%20eq%20''%20and%20CAWorkflowCheckReason%20eq%20''%20and%20TransactionCurrency%20eq%20%27<? disputeCaseCurrency ?>%27%20and%20CAAmountInTransactionCurrency%20lt%200
+        result_variable: result_open_credits
+
+  - condition: result_open_credits.status_code == 200 && result_open_credits.body.value.size() != 0
+    actions:
+      - type: message
+        scripting_type: handlebars
+        message: >
+          {
+            "type": "list",
+            "content": {
+                "title": "Open credits for business partner {{BusinessPartner}} in Contract Accounting",
+                "enableDetailView": false,
+                "elements": [
+                  {{#eachJoin result_open_credits.body.value}}
+                    {
+                      "title": "Document Number: {{CADocumentNumber}}",
+                      "description": "Amount In Transaction Currency: {{CAAmountInTransactionCurrency}}{{ TransactionCurrency }} \nDocument Type: {{CADocumentType}} \nReference Document: {{CAReferenceDocument}} \nCompany Code : {{CompanyCode}} \nContract Account: {{ContractAccount}} \nContract: {{CAContract}} \nPosting Date: {{CAPostingDate}}"
+                    }
+                  {{/eachJoin}}
+                ]
+            }
+          }
+
+  - condition: result_open_credits.status_code == 200 && result_open_credits.body.value.size() == 0
+    actions:
+      - type: message
+        message:
+          type: text
+          content: "No open credits were found in Contract Accounting."
+
+  - condition: result_open_credits.status_code != 200
+    actions:
+      - type: message
+        scripting_type: handlebars
+        message:
+          type: illustrated_message
+          content:
+            illustration_name: "Connection"
+            title: "An error occured while retrieving business partner open credits."
+            subtitle: "Please try again later. In the meantime, consider the following options:"
+
+  - condition: disputeType == 'A003' # A003 Missing Credit
+    actions:
+      - type: message
+        message:
+          type: list
+          content:
+            title: "Would you like to review any of the below options?"
+            subtitle: ""
+            enableDetailView: false
+            elements:
+              - title: "Review Open Credits in Convergent Invoicing"
+                buttons:
+                  - type: postback
+                    title: "Select" #Review Open Credits in Convergent Invoicing
+                    text: "Review Open Credits in Convergent Invoicing"
+                    value: "Fetch open credit memos in Convergent Invoicing for Business Partner <? BusinessPartner ?>"
+              - title: "Review Completed Dispute Cases"
+                buttons:
+                  - type: postback
+                    title: "Select" #Review Completed Dispute Cases
+                    text: "Review Completed Dispute Cases"
+                    value: "Fetch completed dispute cases for Business Partner <? BusinessPartner ?>"
+              - title: "Review the Contract Accounts"
+                buttons:
+                  - type: postback
+                    title: "Select" #Review the Contract Accounts
+                    text: "Review the Contract Accounts"
+                    value: "Fetch Contract Account Partner details for Business Partner <? BusinessPartner ?>"
+
+  - condition: disputeType == 'A002' # A002 Incorrect Credit
+    actions:
+      - type: message
+        message:
+          type: list
+          content:
+            title: "Would you like to review any of the below options?"
+            subtitle: ""
+            enableDetailView: false
+            elements:
+              - title: "Review Open Credits in Convergent Invoicing"
+                buttons:
+                  - type: postback
+                    title: "Select" #Review Open Credits in Convergent Invoicing
+                    text: "Review Open Credits in Convergent Invoicing"
+                    value: "Fetch open credit memos in Convergent Invoicing for Business Partner <? BusinessPartner ?>"
+              - title: "Review Completed Dispute Cases"
+                buttons:
+                  - type: postback
+                    title: "Select" #Review Completed Dispute Cases
+                    text: "Review Completed Dispute Cases"
+                    value: "Fetch completed dispute cases for Business Partner <? BusinessPartner ?>"
+
+  - condition: disputeType != null
+    actions:
+      - type: message
+        message:
+          type: quickReplies
+          content:
+            title: "Is the dispute correct?"
+            buttons:
+              - title: "Yes, process the dispute"
+                value: "Resolve the dispute"
+              - title: "No, reject the dispute"
+                value: "Reject the dispute"

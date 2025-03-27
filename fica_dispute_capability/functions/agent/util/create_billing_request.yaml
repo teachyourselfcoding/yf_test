@@ -1,0 +1,122 @@
+parameters:
+  - name: invoiceId
+  - name: description
+  - name: amount
+  - name: currencyCode
+  - name: disputeCaseID
+
+action_groups:
+  - actions:
+    - type: set-variables
+      variables:
+        - name: creditMemoId
+          value: null
+        - name: creditMemoStatus
+          value: null
+        - name: wrappedFunctionResponse
+          value: {
+              "functionName": "create_billing_request",
+              "isCalled": true,
+              "hasError": false,
+              "messages": [],
+              "errorMessages": []
+            }
+        - name: messages
+          value: []
+        - name: errorMessages
+          value: []
+        - name: hasError
+          value: false
+    - type: api-request
+      method: POST
+      headers:
+        content-type: application/json
+      system_alias: S4HANA_PCE_SSO
+      path: "/sap/opu/odata4/sap/api_cabillingrequest/srvd_a2x/sap/cabillingrequest/0001/CABillgRequest"
+      body: >
+        {
+          "CAInvoicingDocument": "<? invoiceId ?>",
+          "CABillgReqReason": "YCRM",
+          "CABillgReqDescription": "<? description ?>",
+          "_CABillgRequestItem": [
+            {
+              "CABillgReqItmAmount": <? amount ?>,
+              "CABillgReqItmAmountCurrency": "<? currencyCode ?>",
+              "CATaxIsIncluded": true
+            }
+          ]
+        }
+      result_variable: billing_request
+
+  # Handle s/4 errors
+  - condition: billing_request.status_code == 400
+    actions:
+      - type: set-variables
+        variables:
+          - name: msg
+            value: <? billing_request.body.error.message ?>
+          - name: errorMessages
+            value: <? errorMessages.append(msg) ?>
+          - name: hasError
+            value: true
+
+  - condition: billing_request.status_code != 201 && billing_request.status_code != 400
+    actions:
+      - type: set-variables
+        variables:
+        - name: msg
+          value: "Internal server error"
+        - name: errorMessages
+          value: <? errorMessages.append(msg) ?>
+        - name: hasError
+          value: true
+      - type: message
+        scripting_type: handlebars
+        message:
+          type: illustrated_message
+          content:
+            illustration_name: "Connection"
+            title: "An error occurred while creating a Credit memo for Dispute case <? disputeCaseID ?>."
+            subtitle: "Please try again later."
+
+  - condition: billing_request.status_code == 201
+    actions:
+      - type: set-variables
+        variables:
+          - name: creditMemoId
+            value: "<? billing_request.body.CABillgReqDocument ?>"
+          - name: creditMemoStatus
+            value: "<? billing_request.body.CABillgReqStatus ?>"
+          - name: creditMemoType
+            value: "<? billing_request.body.CABillgReqType ?>"
+      - type: set-variables
+        variables:
+          - name: msg
+            value: "The credit memo <? creditMemoId ?> was successfully created for Dispute case <? disputeCaseID ?>."
+          - name: messages
+            value: <? messages.append(msg) ?>
+      - type: status-update
+        message: <? msg ?>            
+
+  - actions:
+      - type: set-variables
+        scripting_type: handlebars
+        variables:
+          - name: wrappedFunctionResponse
+            value: "{{ setValue wrappedFunctionResponse 'hasError' hasError }}"
+      - type: set-variables
+        scripting_type: handlebars
+        variables:
+          - name: wrappedFunctionResponse
+            value: "{{ setValue wrappedFunctionResponse 'messages' messages }}"
+      - type: set-variables
+        scripting_type: handlebars
+        variables:
+          - name: wrappedFunctionResponse
+            value: "{{ setValue wrappedFunctionResponse 'errorMessages' errorMessages }}"
+
+result:
+  status_code: <? billing_request.status_code ?>
+  creditMemoId: "<? creditMemoId ?>"
+  creditMemoStatus: "<? creditMemoStatus ?>"
+  wrappedFunctionResponse: <? wrappedFunctionResponse ?>

@@ -1,0 +1,141 @@
+parameters:
+  - name: BusinessPartner_ui
+    optional: true
+  - name: currency_ui
+    optional: true
+  - name: BusinessPartner
+    optional: true
+  - name: disputeCaseCurrency
+    optional: true
+  - name: disputeCaseId
+    optional: true
+
+action_groups:
+  - condition: BusinessPartner == null || disputeCaseCurrency == null
+    actions:
+      - type: dialog-function
+        name: util/variable_handling
+        parameters:
+          - name: scenario
+            value: "fica_invoices"
+          - name: BusinessPartner_ui
+            value: <? BusinessPartner_ui ?>
+          - name: BusinessPartner
+            value: <? BusinessPartner ?>
+          - name: currency_ui
+            value: <? currency_ui ?>
+          - name: disputeCaseCurrency
+            value: <? disputeCaseCurrency ?>
+        result_variable: handle_result
+      - type: set-variables
+        variables:
+          - name: BusinessPartner
+            value: <? handle_result.BusinessPartner ?>
+          - name: disputeCaseCurrency
+            value: <? handle_result.disputeCaseCurrency ?>
+
+  - condition: BusinessPartner != null && disputeCaseCurrency != null
+    actions:
+      - type: set-variables
+        scripting_type: handlebars
+        variables:
+          - name: todaydate
+            value: "{{ formatDate today 'YYYY-MM-DD' }}"
+          - name: olddate
+            value: "{{ modifyDate subtractDays=90 }}"
+          - name: olddateformatted
+            value: "{{ formatDate olddate 'YYYY-MM-DD' }}"
+      - type: api-request
+        method: GET
+        system_alias: S4HANA_PCE_SSO
+        path: /sap/opu/odata4/sap/api_cabuspartinvoice/srvd_a2x/sap/api_cabuspartinvoice/0002/CABPInvcItemEnhcdForDspCrcy/<? disputeCaseCurrency ?>/Set?%24filter=BusinessPartner%20eq%20%27<? BusinessPartner ?>%27%20and%20CAPostingDate%20lt%20<? todaydate ?>%20and%20CAPostingDate%20gt%20<? olddateformatted ?>&$select=CADocument,AmountInDisplayCurrency,OpenAmountInDisplayCrcy,DisplayCurrency,CAPostingDate,ContractAccount,CompanyCode,CAContract
+        result_variable: result_bp_invoices
+
+  - condition: result_bp_invoices.status_code == 200 && result_bp_invoices.body.value.size() != 0
+    actions:
+      - type: message
+        scripting_type: handlebars
+        message: >
+          {
+            "type": "list",
+            "content": {
+                "title": "Invoices for business partner {{BusinessPartner}}",
+                "enableDetailView": false,
+                "buttons": [
+                  {
+                    "type": "navigation",
+                    "title": "Open in App",
+                    "navigation_target": {
+                      "ibnTarget": {
+                        "semanticObject": "CAContractPartner",
+                        "action": "displayFinancialOverview"
+                      },
+                      "ibnParams": {
+                        "BusinessPartner": "{{BusinessPartner}}",
+                        "DisplayCurrency": "{{disputeCaseCurrency}}"
+                      }
+                    }
+                  }
+                ],
+                "elements": [
+                  {{#eachJoin result_bp_invoices.body.value}}
+                    {
+                      "title": "Document Number: {{CADocument}}",
+                      "description": "Amount: {{AmountInDisplayCurrency}} {{ DisplayCurrency }} \nOpen Amount: {{OpenAmountInDisplayCrcy}} {{ DisplayCurrency }} \nPosting date: {{CAPostingDate}} \nContract Account: {{ContractAccount}} \nCompany Code: {{CompanyCode}} \nContract: {{CAContract}}"
+                    }
+                  {{/eachJoin}}
+                ]
+            }
+          }
+
+  - condition: result_bp_invoices.status_code == 200 && result_bp_invoices.body.value.size() == 0
+    actions:
+      - type: message
+        message:
+          type: text
+          content: "No invoice data was found for business partner <? BusinessPartner ?>."
+
+  - condition: result_bp_invoices.status_code != 200
+    actions:
+      - type: message
+        scripting_type: handlebars
+        message:
+          type: illustrated_message
+          content:
+            illustration_name: "Connection"
+            title: "An error occured while retrieving the invoice data."
+            subtitle: "Please try again later. In the meantime, consider the following options:"
+
+  - condition: disputeCaseId != null
+    actions:
+      - type: message
+        message:
+          type: list
+          content:
+            title: "Would you like to review any of the below options?"
+            subtitle: ""
+            enableDetailView: false
+            elements:
+              - title: "Review Invoicing Documents for past 3 months"
+                buttons:
+                  - type: postback
+                    title: "Select" #Review Invoicing Documents for past 3 months
+                    text: "Review Invoicing Documents for past 3 months"
+                    value: "Fetch invoicing documents for last 3 months for Business Partner <? BusinessPartner ?>"
+              - title: "Review the Contract Accounts"
+                buttons:
+                  - type: postback
+                    title: "Select" #Review the Contract Accounts
+                    text: "Review the Contract Accounts"
+                    value: "Fetch Contract Account Partner details for Business Partner <? BusinessPartner ?>"
+
+      - type: message
+        message:
+          type: quickReplies
+          content:
+            title: "Is the dispute correct?"
+            buttons:
+              - title: "Yes, process the dispute"
+                value: "Resolve the dispute"
+              - title: "No, reject the dispute"
+                value: "Reject the dispute"

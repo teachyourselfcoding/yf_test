@@ -1,0 +1,45 @@
+ deployment_conditions: # condition evaluated during deployment
+  capability_filter:
+    match: ANY
+    ppmsProductVersionRelease: ['2023']
+    ppmsProductVersionSupportPackage: ['01','02','03','04','05','06','07','08']
+  scenarios_filter:
+    - name: ['process_dispute_case_agent']
+      match: ANY      
+      ppmsProductVersionSupportPackage: ['01','02','03','04','05','06','07','08']
+    - name: ['add_case_object']
+      match: ANY
+      ppmsProductVersionSupportPackage: ['01','02','03','04','05','06','07','08']
+    - name: ['close_dispute_case']
+      match: ANY
+      ppmsProductVersionSupportPackage: ['01','02','03','04','05','06','07','08']
+    - name: ['fetch_bp_invoices']
+      match: ANY
+      ppmsProductVersionSupportPackage: ['01','02','03','04','05','06','07','08']
+    - name: ['fetch_ci_invoices']
+      match: ANY
+      ppmsProductVersionSupportPackage: ['01','02','03','04','05','06','07','08']
+    - name: ['fetch_ci_open_credits']
+      match: ANY
+      ppmsProductVersionSupportPackage: ['01','02','03','04','05','06','07','08']
+    - name: ['fetch_closed_dispute_cases']
+      match: ANY
+      ppmsProductVersionSupportPackage: ['01','02','03','04','05','06','07','08']
+    - name: ['fetch_contract_account']
+      match: ANY
+      ppmsProductVersionSupportPackage: ['01','02','03','04','05','06','07','08']
+    - name: ['fetch_dispute_case']
+      match: ANY
+      ppmsProductVersionSupportPackage: ['01','02','03','04','05','06','07','08']
+    - name: ['fetch_fica_open_credits']
+      match: ANY
+      ppmsProductVersionSupportPackage: ['01','02','03','04','05','06','07','08']
+    - name: ['not_disputed_credits']
+      match: ANY
+      ppmsProductVersionSupportPackage: ['01','02','03','04','05','06','07','08']
+    - name: ['resolve_dispute']
+      match: ANY
+      ppmsProductVersionSupportPackage: ['01','02','03','04','05','06','07','08']
+    - name: ['void_dispute_case']
+      match: ANY
+      ppmsProductVersionSupportPackage: ['01','02','03','04','05','06','07','08']

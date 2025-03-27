@@ -1,0 +1,67 @@
+---
+# generates a schema for structured agent response
+action_groups:
+  - actions:
+      - type: set-variables
+        variables:
+          - name: jsonSchema
+            value: >
+                    {
+                      "$schema": "http://json-schema.org/draft-07/schema#",
+                      "description": "Dispute case object",
+                      "type": "object",
+                      "properties":
+                        {
+                          "msg":
+                            {
+                              "type": "string",
+                              "description": "Summary of activities taken by the dispute resolution expert"
+                            },
+                          "disputeCaseId":
+                            {
+                              "type": "string",
+                              "description": "Id of the dispute case"
+                            },
+                          "disputedAmount":
+                            {
+                              "type": "string",
+                              "description": "The amount in dispute"
+                            },
+                          "disputeCaseCurrency":
+                            {
+                              "type": "string",
+                              "description": "The currency of amount in dispute"
+                            },
+                          "businessPartnerFullName":
+                            {
+                              "type": "string",
+                              "description": "Full name of the associated business partner"
+                            },
+                          "disputeCaseStatusText":
+                            {
+                              "type": "string",
+                              "description": "Status of the dispute case"
+                            },
+                          "invoiceId":
+                            {
+                              "type": "string",
+                              "description": "Id of disputed invoice"
+                            },
+                          "creditMemoId":
+                            {
+                              "type": "string",
+                              "description": "Id of the credit memo"
+                            },
+                          "creditMemoStatus":
+                            {
+                              "type": "string",
+                              "description": "Status of the credit memo"
+                            }
+                        },
+                      "required":
+                        ["disputeCaseId", "disputeCaseStatusText", "invoiceId"],
+                      "additionalProperties": false
+                    }
+              
+result:
+  schema: "<? jsonSchema ?>"

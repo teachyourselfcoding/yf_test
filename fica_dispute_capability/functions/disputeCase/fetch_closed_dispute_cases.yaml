@@ -1,0 +1,199 @@
+parameters:
+  - name: BusinessPartner_ui
+    optional: true
+  - name: BusinessPartner
+    optional: true
+  - name: disputeType
+    optional: true
+
+action_groups:
+  - condition: BusinessPartner == null
+    actions:
+      - type: dialog-function
+        name: util/variable_handling
+        parameters:
+          - name: scenario
+            value: "closed_dispute_cases"
+          - name: BusinessPartner_ui
+            value: <? BusinessPartner_ui ?>
+          - name: BusinessPartner
+            value: <? BusinessPartner ?>
+        result_variable: handle_result
+      - type: set-variables
+        variables:
+          - name: BusinessPartner
+            value: <? handle_result.BusinessPartner ?>
+
+  - condition: BusinessPartner != null
+    actions:
+      - type: api-request
+        method: GET
+        system_alias: S4HANA_PCE_SSO
+        path: /sap/opu/odata/sap/O2C_FICA_DISPUTE_MANAGE_SRV/I_CACaseStatusVH?$format=json&$filter=CaseSystemStatus%20eq%20%27007%27%20or%20CaseSystemStatus%20eq%20%27008%27%20or%20CaseSystemStatus%20eq%20%27009%27
+        result_variable: result_casestatus
+
+  - condition: result_casestatus.status_code == 200 && result_casestatus.body.d.results.size() != 0 && BusinessPartner != null
+    actions:
+      - type: set-variables
+        scripting_type: handlebars
+        variables:
+          - name: CaseStatusFilter
+            value: >
+              [
+                {{#eachJoin result_casestatus.body.d.results}}
+                  {
+                    "service-value": "{{CaseStatus}}",
+                    "filter-operator": "eq",
+                    "service-attribute": "CaseStatus"
+                  }
+                {{/eachJoin}}
+              ]
+          - name: BusinessPartnerFilter
+            value: >
+              {
+                "service-value": "{{BusinessPartner}}",
+                "filter-operator": "eq",
+                "service-attribute": "BusinessPartner"
+              }
+          - name: filterCaseStatus
+            value: "{{odataFilter CaseStatusFilter}}"
+          - name: filterBP
+            value: "{{odataFilter BusinessPartnerFilter}}"
+          - name: suffixedFilterBP
+            value: "{{append '%20and%20' filterBP}}"
+          - name: odataFilterFinal
+            value: "{{append filterCaseStatus suffixedFilterBP}}"
+
+  - condition: result_casestatus.status_code == 200 && result_casestatus.body.d.results.size() == 0
+    actions:
+      - type: message
+        message:
+          type: text
+          content: "No case statuses were found for the system status 'Closed'. Therefore, closed dispute cases cannot be retrieved."
+
+  - condition: result_casestatus.status_code == 200 && result_casestatus.body.d.results.size() != 0 && BusinessPartner != null
+    actions:
+      - type: api-request
+        method: GET
+        system_alias: S4HANA_PCE_SSO
+        path: /sap/opu/odata4/sap/api_cadisputecase/srvd_a2x/sap/cadisputecase/0001/DisputeCase?$filter=<? odataFilterFinal ?>
+        result_variable: result_closed_dispute
+
+  - condition: result_closed_dispute.status_code == 200 && result_closed_dispute.body.value.size() != 0
+    actions:
+      - type: message
+        scripting_type: handlebars
+        message: >
+          {
+            "type": "list",
+            "content": {
+                "title": "Completed dispute cases for business partner {{BusinessPartner}}",
+                "enableDetailView": false,
+                "buttons": [
+                  {
+                    "type": "navigation",
+                    "title": "Open in App",
+                    "navigation_target": {
+                      "ibnTarget": {
+                        "semanticObject": "CADisputeCase",
+                        "action": "manage"
+                      },
+                      "ibnParams": {
+                        "BusinessPartner": "{{BusinessPartner}}"
+                      }
+                    }
+                  }
+                ],
+                "elements": [
+                  {{#eachJoin result_closed_dispute.body.value}}
+                    {
+                      "title": "Dispute Case ID: {{CaseID}}",
+                      "description": "Disputed Amount: {{DisputedAmount}} {{DisputeCaseCurrency}} \nDispute Type: {{CADisputeType}} {{CADisputeTypeText}} \nCase Reason: {{CaseReason}} {{CaseReasonName}} \n Contract Account: {{ContractAccount}} \nCompany Code: {{CompanyCode}} \nCase Status: {{CaseStatusName}}"
+                    }
+                  {{/eachJoin}}
+                ]
+            }
+          }
+
+  - condition: result_closed_dispute.status_code == 200 && result_closed_dispute.body.value.size() == 0
+    actions:
+      - type: message
+        message:
+          type: text
+          content: "There were no closed dispute cases found for business partner <? BusinessPartner ?>."
+
+  - condition: result_closed_dispute.status_code != 200
+    actions:
+      - type: message
+        scripting_type: handlebars
+        message:
+          type: illustrated_message
+          content:
+            illustration_name: "Connection"
+            title: "An error occured while retrieving the closed dispute cases."
+            subtitle: "Please try again later. In the meantime, consider the following options:"
+
+  - condition: disputeType == 'A003' # Missing Credit
+    actions:
+      - type: message
+        message:
+          type: list
+          content:
+            title: "Would you like to review any of the below options"
+            subtitle: ""
+            enableDetailView: false
+            elements:
+              - title: "Review Open Credits in Contract Accounting"
+                buttons:
+                  - type: postback
+                    title: "Select" #Review Open Credits in Contract Accounting
+                    text: "Review Open Credits in Contract Accounting"
+                    value: "Fetch open credits in Contract Accounting for Business Partner <? BusinessPartner ?>"
+              - title: "Review Open Credits in Convergent Invoicing"
+                buttons:
+                  - type: postback
+                    title: "Select" #Review Open Credits in Convergent Invoicing
+                    text: "Review Open Credits in Convergent Invoicing"
+                    value: "Fetch open credit memos in Convergent Invoicing for Business Partner <? BusinessPartner ?>"
+              - title: "Review the Contract Accounts"
+                buttons:
+                  - type: postback
+                    title: "Select" #Review the Contract Accounts
+                    text: "Review the Contract Accounts"
+                    value: "Fetch Contract Account Partner details for Business Partner <? BusinessPartner ?>"
+
+  - condition: disputeType == 'A002' # Incorrect Credit
+    actions:
+      - type: message
+        message:
+          type: list
+          content:
+            title: "Would you like to review any of the below options"
+            subtitle: ""
+            enableDetailView: false
+            elements:
+              - title: "Review Open Credits in Contract Accounting"
+                buttons:
+                  - type: postback
+                    title: "Select" #Review Open Credits in Contract Accounting
+                    text: "Review Open Credits in Contract Accounting"
+                    value: "Fetch open credits in Contract Accounting for Business Partner <? BusinessPartner ?>"
+              - title: "Review Open Credits in Convergent Invoicing"
+                buttons:
+                  - type: postback
+                    title: "Select" #Review Open Credits in Convergent Invoicing
+                    text: "Review Open Credits in Convergent Invoicing"
+                    value: "Fetch open credit memos in Convergent Invoicing for Business Partner <? BusinessPartner ?>"
+
+  - condition: disputeType != null
+    actions:
+      - type: message
+        message:
+          type: quickReplies
+          content:
+            title: "Is the dispute correct?"
+            buttons:
+              - title: "Yes, process the dispute"
+                value: "Resolve the dispute"
+              - title: "No, reject the dispute"
+                value: "Reject the dispute"

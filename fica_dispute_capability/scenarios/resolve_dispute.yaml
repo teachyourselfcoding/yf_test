@@ -1,0 +1,28 @@
+description: This function provides options for resolution of dispute.
+
+slots:
+  - name: disputeCaseId_ui
+    description: Dispute Case ID for a dispute cases.
+
+target:
+  type: function
+  name: disputeCase/dispute_resolution
+  parameters:
+    - name: disputeCaseId
+      value: $capability_context.disputeCaseId
+    - name: caseUUID
+      value: $capability_context.caseUUID
+    - name: BusinessPartner
+      value: $capability_context.BusinessPartner
+    - name: disputeStatus
+      value: $capability_context.disputeStatus
+    - name: disputeType
+      value: $capability_context.disputeType
+
+visibility_condition:
+  objects:
+    - type: ibn_targets
+      match: ALL
+      intents:
+        - semantic_object: CADisputeCase
+          action: manage

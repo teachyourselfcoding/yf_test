@@ -1,0 +1,18 @@
+description: This function fetches the not disputed credits for a dispute case.
+
+target:
+  type: function
+  name: disputeCase/fetch_not_disputed_credits
+  parameters:
+    - name: caseUUID
+      value: $capability_context.caseUUID
+    - name: disputeType
+      value: $capability_context.disputeType
+
+visibility_condition:
+  objects:
+    - type: ibn_targets
+      match: ALL
+      intents:
+        - semantic_object: CADisputeCase
+          action: manage

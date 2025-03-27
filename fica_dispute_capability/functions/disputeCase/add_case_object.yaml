@@ -1,0 +1,101 @@
+parameters:
+  - name: disputeCaseId_ui
+    optional: true
+  - name: caseUUID
+    optional: true
+  - name: disputeCaseId
+    optional: true
+  - name: object_key
+    optional: false
+  - name: disputeType
+    optional: true
+
+action_groups:
+  - condition: disputeCaseId == null
+    actions:
+      - type: dialog-function
+        name: util/variable_handling
+        parameters:
+          - name: scenario
+            value: "add_case_object"
+          - name: disputeCaseId_ui
+            value: <? disputeCaseId_ui ?>
+          - name: disputeCaseId
+            value: <? disputeCaseId ?>
+          - name: object_key
+            value: <? object_key ?>
+        result_variable: handle_result
+      - type: set-variables
+        variables:
+          - name: disputeCaseId
+            value: <? handle_result.disputeCaseId ?>
+  - condition: caseUUID == null && disputeCaseId != null
+    actions:
+      - type: dialog-function
+        name: util/get_dispute_details
+        parameters:
+          - name: disputeCaseId
+            value: <? disputeCaseId ?>
+        result_variable: dispute_details
+      - type: set-variables
+        variables:
+          - name: caseUUID
+            value: <? dispute_details.value.CaseUUID ?>
+          - name: disputeType
+            value: <? dispute_details.value.CADisputeType ?>
+
+  - condition: disputeType == 'A002' || disputeType == 'A003' #A002 Incorrect Credit, #A003 Missing Credit
+    actions:
+      - type: set-variables
+        variables:
+          - name: object_type
+            value: CA_CREDINF
+          - name: disp_text
+            value: "Credit Memo"
+  - condition: disputeType == 'B001' #B001 Missing Payment
+    actions:
+      - type: set-variables
+        variables:
+          - name: object_type
+            value: CA_PAYINFO
+          - name: disp_text
+            value: "Payment"
+
+  - condition: caseUUID != null
+    actions:
+      - type: api-request
+        method: POST
+        headers:
+          content-type: application/json
+        system_alias: S4HANA_PCE_SSO
+        path: /sap/opu/odata4/sap/api_cadisputecase/srvd_a2x/sap/cadisputecase/0001/DisputeCaseObject
+        body:
+          {
+            "CaseUUID": "<? caseUUID ?>",
+            "ObjectType": "<? object_type ?>",
+            "ObjectKey": "<? object_key ?>",
+          }
+        result_variable: result_addobject
+
+  - condition: result_addobject.status_code == 201
+    actions:
+      - type: message
+        message:
+          type: text
+          content: "The <? disp_text ?> <? object_key ?> was successfully assigned to the dispute case."
+      - type: message
+        message:
+          type: buttons
+          content:
+            title: "Would you like to close the dispute case?"
+            buttons:
+              - type: postback
+                title: "Yes"
+                value: "Close Dispute Case"
+
+  - condition: result_addobject.status_code != 201
+    actions:
+      - type: message
+        message:
+          type: text
+          content: "Due to the following error, <? disp_text ?> <? object_key ?> could not be assigned to the dispute case with the ID <? disputeCaseId ?>: <? result_addobject.body.error.message ?>"

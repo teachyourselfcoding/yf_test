@@ -1,0 +1,108 @@
+parameters:
+  - name: creditMemoId
+    optional: false
+
+action_groups:
+  - actions:
+      - type: set-variables
+        variables:
+          - name: creditMemoStatus
+            value: null
+          - name: wrappedFunctionResponse
+            value: {
+              "functionName": "set_billing_request_release",
+              "isCalled": true,
+              "hasError": false,
+              "messages": [],
+              "errorMessages": []
+            }
+          - name: messages
+            value: []
+          - name: errorMessages
+            value: []
+          - name: hasError
+            value: false
+      - type: api-request
+        method: POST
+        headers:
+          content-type: application/json
+        system_alias: S4HANA_PCE_SSO
+        path: "/sap/opu/odata4/sap/api_cabillingrequest/srvd_a2x/sap/cabillingrequest/0001/CABillgRequest/<? creditMemoId ?>/SAP__self.Release"
+        result_variable: result_addobject
+
+  - condition: result_addobject.status_code == 404
+    actions:
+      - type: set-variables
+        variables:
+          - name: msg
+            value: "There was no credit memo found for id <? creditMemoId ?>"
+          - name: errorMessages
+            value: <? errorMessages.append(msg) ?>
+          - name: hasError
+            value: true
+
+  - condition: result_addobject.status_code != 200 && result_addobject.status_code != 404
+    actions:
+      - type: set-variables
+        variables:
+          - name: errorMessages
+            value: <? errorMessages.append('Internal server error') ?>
+          - name: hasError
+            value: true
+
+      - type: message
+        scripting_type: handlebars
+        message:
+          type: illustrated_message
+          content:
+            illustration_name: "Connection"
+            title: "An error occurred while releasing the credit memo."
+            subtitle: "Please try again later."
+
+  - condition: result_addobject.body.CABillgReqStatus != "R"
+    actions:
+      - type: set-variables
+        variables:
+          - name: errorMessages
+            value: <? errorMessages.append('Credit memo was released but returned status is not "R"') ?>
+          - name: hasError
+            value: true
+
+
+  - condition: result_addobject.status_code == 200
+    actions:
+        - type: set-variables
+          variables:
+            - name: msg
+              value: "The credit memo <? creditMemoId ?> was successfully released."
+            - name: messages
+              value: <? messages.append(msg) ?>
+            - name: creditMemoStatus
+              value: "<? result_addobject.body.CABillgReqStatus ?>"
+            - name: creditMemoId
+              value: "<? result_addobject.body.CABillgReqDocument ?>"
+
+        - type: status-update
+          message: <? msg ?>
+
+  - actions:
+      - type: set-variables
+        scripting_type: handlebars
+        variables:
+          - name: wrappedFunctionResponse
+            value: "{{ setValue wrappedFunctionResponse 'hasError' hasError }}"
+      - type: set-variables
+        scripting_type: handlebars
+        variables:
+          - name: wrappedFunctionResponse
+            value: "{{ setValue wrappedFunctionResponse 'messages' messages }}"
+      - type: set-variables
+        scripting_type: handlebars
+        variables:
+          - name: wrappedFunctionResponse
+            value: "{{ setValue wrappedFunctionResponse 'errorMessages' errorMessages }}"
+
+result:
+  creditMemoStatus: "<? creditMemoStatus ?>"
+  creditMemoId: "<? creditMemoId ?>"
+  wrappedFunctionResponse: <? wrappedFunctionResponse ?>

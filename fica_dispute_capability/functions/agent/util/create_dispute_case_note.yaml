@@ -1,0 +1,89 @@
+parameters:
+  - name: disputeCaseUUID
+    optional: false
+  - name: caseNoteText
+    optional: false
+
+action_groups:
+
+  - actions:
+      - type: set-variables
+        variables:
+          - name: wrappedFunctionResponse
+            value: {
+              "functionName": "create_dispute_case_note",
+              "isCalled": true,
+              "hasError": false,
+              "messages": [],
+              "errorMessages": []
+            }
+          - name: messages
+            value: []
+          - name: errorMessages
+            value: []
+          - name: hasError
+            value: false
+      - type: api-request
+        method: POST
+        headers:
+          content-type: application/json
+        system_alias: S4HANA_PCE_SSO
+        path: "/sap/opu/odata4/sap/api_cadisputecase/srvd_a2x/sap/cadisputecase/0001/DisputeCase/<? disputeCaseUUID ?>/SAP__self.AssignNote"
+        body: { "CaseNoteText": "<? caseNoteText ?>" }
+        result_variable: result_assign_note
+
+  - condition: result_assign_note.status_code == 204
+    actions:
+      - type: set-variables
+        variables:
+          - name: msg
+            value: "Attached note to Dispute Case. Note text: <? caseNoteText ?>."
+          - name: messages
+            value: <? messages.append(msg) ?>
+      - type: status-update
+        message: <? msg ?>            
+
+  # Handle s/4 errors
+  - condition: result_assign_note.status_code == 400
+    actions:
+      - type: set-variables
+        variables:
+          - name: errorMessages
+            value: <? errorMessages.append(result_assign_note.body.error.message) ?>
+          - name: hasError
+            value: true
+
+  # Handle all other errors
+  - condition: result_assign_note.status_code != 204 && result_assign_note.status_code != 400
+    actions:
+      - type: set-variables
+        variables:
+        - name: msg
+          value: "Internal Server Error"
+        - name: errorMessages
+          value: <? errorMessages.append(msg) ?>
+        - name: hasError
+          value: true
+      - type: status-update
+        message: "An error occured while attaching note to dispute case."
+
+  - actions:
+      - type: set-variables
+        scripting_type: handlebars
+        variables:
+          - name: wrappedFunctionResponse
+            value: "{{ setValue wrappedFunctionResponse 'hasError' hasError }}"
+      - type: set-variables
+        scripting_type: handlebars
+        variables:
+          - name: wrappedFunctionResponse
+            value: "{{ setValue wrappedFunctionResponse 'messages' messages }}"
+      - type: set-variables
+        scripting_type: handlebars
+        variables:
+          - name: wrappedFunctionResponse
+            value: "{{ setValue wrappedFunctionResponse 'errorMessages' errorMessages }}"
+
+result:
+    status_code: <? result_assign_note.status_code ?>
+    wrappedFunctionResponse: <? wrappedFunctionResponse ?>

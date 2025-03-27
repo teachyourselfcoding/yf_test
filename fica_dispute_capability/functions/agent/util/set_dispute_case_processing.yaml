@@ -1,0 +1,140 @@
+parameters:
+  - name: disputeCaseUUID
+    optional: false
+
+action_groups:
+  - actions:
+    # Stage 0: Initialisation and attempt to retrieve system case status Being Processed (002)
+    - type: set-variables
+      variables:
+        - name: caseStatusFound
+          value: false
+        - name: disputeNewStatus
+          value: null
+        - name: disputeNewStatusName
+          value: null
+        - name: disputeNewSystemStatus
+          value: null
+        - name: wrappedFunctionResponse
+          value:
+            {
+              "functionName": "set_dispute_case_processing",
+              "isCalled": true,
+              "hasError": false,
+              "messages": [],
+              "errorMessages": []
+            }
+        - name: messages
+          value: []
+        - name: errorMessages
+          value: []
+        - name: hasError
+          value: false
+
+    - type: api-request
+      method: GET
+      system_alias: S4HANA_PCE_SSO
+      path: "/sap/opu/odata/sap/UI_CADISPUTECASE/I_CACaseStatusVH?$format=json&$filter=CaseSystemStatus%20eq%20%27002%27" #002=Being Processed
+      result_variable: result_casestatus
+
+  # Stage 1: Retrieval of case status -- Fail (API Error)
+  - condition: result_casestatus.status_code != 200
+    actions:
+      - type: set-variables
+        variables:
+          - name: msg
+            value: "An error occured while retrieving the in process status type."
+          - name: errorMessages
+            value: <? errorMessages.append(msg) ?>
+          - name: hasError
+            value: true
+      - type: status-update
+        message: "An error occured while retrieving the 'Being Processed' status type."
+
+  # Stage 1: Retrieval of case status -- Fail (Not Found)
+  - condition: result_casestatus.status_code == 200 && result_casestatus.body.d.results.size() == 0
+    actions:
+      - type: set-variables
+        variables:
+          - name: msg
+            value: "No case statuses were found for the system status 'Being Processed'. Therefore, the dispute case cannot be processed."
+          - name: errorMessages
+            value: <? errorMessages.append(msg) ?>
+          - name: hasError
+            value: true
+      - type: status-update
+        message: <? msg ?>
+
+  # Stage 1: Retrieval of case status -- Success, Attempt to Update Dispute Case
+  - condition: result_casestatus.status_code == 200 && result_casestatus.body.d.results.size() > 0
+    actions:
+      - type: set-variables
+        variables:
+          - name: caseStatusFound
+            value: true
+          - name: inProcessStatus
+            value: <? result_casestatus.body.d.results[0].CaseStatus ?>
+          - name: msg
+            value: "System status 'Being Processed' found"
+          - name: messages
+            value: <? messages.append(msg) ?>
+      - type: api-request
+        method: PATCH
+        headers:
+          content-type: application/json
+        system_alias: S4HANA_PCE_SSO
+        path: "/sap/opu/odata4/sap/api_cadisputecase/srvd_a2x/sap/cadisputecase/0001/DisputeCase(<? disputeCaseUUID ?>)"
+        body: { "CaseStatus": "<? inProcessStatus ?>" }
+        result_variable: result_patch_in_process
+
+  # Stage 2: Attempt to update dispute case -- Fail (API Error)
+  - condition: caseStatusFound && result_patch_in_process.status_code != 200
+    actions:
+      - type: set-variables
+        variables:
+          - name: msg
+            value: "The dispute case cannot be processed as it cannot be set to 'In Process' status."
+          - name: errorMessages
+            value: <? errorMessages.append(msg) ?>
+      - type: status-update
+        message: <? msg ?>
+
+  # Stage 2: Attempt to update dispute case -- Success
+  - condition: caseStatusFound && result_patch_in_process.status_code == 200
+    actions:
+      - type: set-variables
+        variables:
+          - name: disputeNewStatus
+            value: <? result_patch_in_process.body.CaseStatus ?>
+          - name: disputeNewStatusName
+            value: <? result_patch_in_process.body.CaseStatusName ?>
+          - name: disputeNewSystemStatus
+            value: <? result_patch_in_process.body.CaseSystemStatus ?>
+          - name: msg
+            value: "Updated dispute case to 'In Process' status"
+          - name: messages
+            value: <? messages.append(msg) ?>
+
+  - actions:
+      - type: set-variables
+        scripting_type: handlebars
+        variables:
+          - name: wrappedFunctionResponse
+            value: "{{ setValue wrappedFunctionResponse 'hasError' hasError }}"
+      - type: set-variables
+        scripting_type: handlebars
+        variables:
+          - name: wrappedFunctionResponse
+            value: "{{ setValue wrappedFunctionResponse 'messages' messages }}"
+      - type: set-variables
+        scripting_type: handlebars
+        variables:
+          - name: wrappedFunctionResponse
+            value: "{{ setValue wrappedFunctionResponse 'errorMessages' errorMessages }}"
+
+result:
+  disputeCaseStatus: <? disputeNewStatus ?>
+  disputeCaseStatusName: <? disputeNewStatusName ?>
+  disputeCaseSystemStatus: <? disputeNewSystemStatus ?>
+  wrappedFunctionResponse: <? wrappedFunctionResponse ?>
+

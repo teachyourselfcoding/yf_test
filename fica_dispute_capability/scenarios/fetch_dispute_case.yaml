@@ -1,0 +1,43 @@
+description: This function fetches the dispute case using Dispute Case number.
+
+slots:
+  - name: disputeCaseId
+    description: Dispute Case ID for a dispute cases.
+
+conversation_starter:
+  title: Show Dispute Case
+  trigger_utterance: show me dispute case
+
+target:
+  type: function
+  name: disputeCase/fetch_dispute_case
+  parameters:   # <-- validation that no slot with same name is defined
+    - name: lastAgentQuestionHistoryId
+      value: $capability_context.lastAgentQuestionHistoryId  # hand over response from HITL step
+    - name: lastAgentProcessedDisputeCaseId
+      value: $capability_context.lastAgentProcessedDisputeCaseId  # hand over dispute Case Id from HITL step
+    - name: agent_id_dispute_resolution_agent
+      value: $capability_context.agent_id_dispute_resolution_agent  # hand over agent id, workaround for agent_id not in system_context
+
+capability_context:
+  - name: disputeCaseId
+    value: $target_result.disputeCaseId
+  - name: BusinessPartner
+    value: $target_result.BusinessPartner
+  - name: caseUUID
+    value: $target_result.caseUUID
+  - name: disputeType
+    value: $target_result.disputeType
+  - name: disputeCaseCurrency
+    value: $target_result.disputeCaseCurrency
+  - name: caseStatusProfile
+    value: $target_result.caseStatusProfile
+  - name: disputeStatus
+    value: $target_result.disputeStatus
+  - name: lastAgentProcessedDisputeCaseId
+    value: $target_result.disputeCaseId  # store dispute case id of last agent processed dialog step
+  - name: lastAgentQuestionHistoryId
+    value: $target_result.agentQuestionHistoryId  # store response of current step for use in next step (only if HITL)
+  - name: agent_id_dispute_resolution_agent
+    value: $target_result.agent_id_dispute_resolution_agent
+

@@ -1,0 +1,37 @@
+# outputs a message (message parameter) to the chat window or a status update (outputType parameter) to the chat window
+
+parameters:
+  - name: message
+    optional: false
+  - name: outputType
+    optional: true
+
+
+action_groups:
+  - actions:
+    - type: set-variables
+      variables:
+        - name: enableDebugOutput
+          #value: true # <<<<<<<<<<<<<<<<< true = ENABLE debug output
+          value: false # <<<<<<<<<<<<<<<<< false = DISABLE debug output
+        - name: outputDone
+          value: false
+
+  - condition: outputType == "status-update" && enableDebugOutput == true  # outputType == "status-update"
+    actions:
+      - type: status-update
+        message: "DEBUG: <? message ?>"
+      - type: set-variables
+        variables:
+          - name: outputDone
+            value: true
+
+  - condition: outputDone == false && enableDebugOutput == true   #default outputType == "message"
+    actions:
+      - type: message
+        message: 
+          type: text
+          content: "DEBUG: <? message ?>"
+          markdown: true
+
+

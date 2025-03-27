@@ -1,0 +1,62 @@
+parameters:
+  - name: disputeCaseId_ui
+    optional: true
+  - name: disputeCaseId
+    optional: true
+  - name: caseUUID
+    optional: true
+
+action_groups:
+  - condition: disputeCaseId == null
+    actions:
+      - type: dialog-function
+        name: util/variable_handling
+        parameters:
+          - name: scenario
+            value: "void_dispute"
+          - name: disputeCaseId_ui
+            value: <? disputeCaseId_ui ?>
+          - name: disputeCaseId
+            value: <? disputeCaseId ?>
+        result_variable: handle_result
+      - type: set-variables
+        variables:
+          - name: disputeCaseId
+            value: <? handle_result.disputeCaseId ?>
+
+  - condition: caseUUID == null && disputeCaseId != null
+    actions:
+      - type: dialog-function
+        name: util/get_dispute_details
+        parameters:
+          - name: disputeCaseId
+            value: <? disputeCaseId ?>
+        result_variable: dispute_details
+      - type: set-variables
+        variables:
+          - name: caseUUID
+            value: <? dispute_details.value.CaseUUID ?>
+
+  - condition: caseUUID != null
+    actions:
+      - type: api-request
+        method: POST
+        headers:
+          content-type: application/json
+        system_alias: S4HANA_PCE_SSO
+        path: /sap/opu/odata4/sap/api_cadisputecase/srvd_a2x/sap/cadisputecase/0001/DisputeCase(<? caseUUID ?>)/SAP__self.SetDisputeCaseToVoid
+        result_variable: result_void_dispute
+
+  - condition: result_void_dispute.status_code == 204
+    actions:
+      - type: message
+        message:
+          type: text
+          content: "The dispute case with ID <? disputeCaseId ?> was set successfully to 'Void' status."
+
+  - condition: result_void_dispute.status_code != 204
+    actions:
+      - type: message
+        message:
+          type: text
+          content: "Due to the following error, the dispute case with the ID <? disputeCaseId ?> could not be voided: <? result_void_dispute.body.error.message ?>"

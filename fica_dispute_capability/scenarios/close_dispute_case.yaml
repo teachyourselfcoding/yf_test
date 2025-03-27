@@ -1,0 +1,22 @@
+description: This function closes the dispute case.
+
+slots:
+  - name: disputeCaseId_ui
+    description: Dispute Case ID of a dispute case.
+
+target:
+  type: function
+  name: disputeCase/close_dispute_case
+  parameters:
+    - name: disputeCaseId
+      value: $capability_context.disputeCaseId
+    - name: caseUUID
+      value: $capability_context.caseUUID
+
+visibility_condition:
+  objects:
+    - type: ibn_targets
+      match: ALL
+      intents:
+        - semantic_object: CADisputeCase
+          action: manage

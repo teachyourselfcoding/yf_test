@@ -1,0 +1,26 @@
+description: This function adds (or assigns) case object (which can be a credit memo or a payment) to a dispute case.
+
+slots:
+  - name: object_key
+    description: ID for the case object. This can be credit memo number or payment number. Also known as object key for the case object.
+  - name: disputeCaseId_ui
+    description: Dispute Case ID of a dispute case.
+
+target:
+  type: function
+  name: disputeCase/add_case_object
+  parameters:
+    - name: disputeCaseId
+      value: $capability_context.disputeCaseId
+    - name: caseUUID
+      value: $capability_context.caseUUID
+    - name: disputeType
+      value: $capability_context.disputeType
+
+visibility_condition:
+  objects:
+    - type: ibn_targets
+      match: ALL
+      intents:
+        - semantic_object: CADisputeCase
+          action: manage

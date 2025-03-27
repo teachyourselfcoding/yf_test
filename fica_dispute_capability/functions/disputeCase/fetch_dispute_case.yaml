@@ -1,0 +1,261 @@
+parameters:
+  - name: disputeCaseId
+  - name: lastAgentProcessedDisputeCaseId #disputeCaseId from last agent step to check if HITL answer is exactly for that Dispute Case
+    optional: true
+  - name: lastAgentQuestionHistoryId  #response from last step to provide historyId for continueMessage
+    optional: true  
+  - name: agent_id_dispute_resolution_agent
+    optional: true
+
+action_groups:
+  - condition: agent_id_dispute_resolution_agent == null || agent_id_dispute_resolution_agent == ""
+    actions:
+      - type: set-variables
+        variables:
+        - name: agent_id_dispute_resolution_agent
+          value: "<? $system_context.systems.?[system_type == 'unified.agent.system'].get(0).properties.get(0).agent_id ?>" #get agent_id from system context, workaround for agent_id not in system_context in second conversation step
+
+  - actions:
+      - type: dialog-function
+        name: util/get_dispute_details
+        parameters:
+          - name: disputeCaseId
+            value: <? disputeCaseId ?>
+        result_variable: dispute_details
+      - type: set-variables
+        variables:
+          - name: BusinessPartner
+            value: <? dispute_details.value.BusinessPartner ?>
+          - name: disputeType
+            value: <? dispute_details.value.CADisputeType ?>
+          - name: caseUUID
+            value: <? dispute_details.value.CaseUUID ?>
+          - name: disputeCaseCurrency
+            value: <? dispute_details.value.DisputeCaseCurrency ?>
+          - name: caseStatusProfile
+            value: <? dispute_details.value.CaseStatusProfile ?>
+          - name: disputeStatus
+            value: <? dispute_details.value.CaseSystemStatus ?>
+          - name: disputeTypeText
+            value: <? dispute_details.value.CADisputeTypeText ?>
+          - name: caseStatusText
+            value: <? dispute_details.value.CaseStatusName ?>
+          - name: agentResponseHistoryId # initialize return
+            value: ""
+          - name: agentResponseDisputeCaseId # initialize return
+            value: ""
+
+  - condition: dispute_details.status_code == 200 && dispute_details.number_of_results > 0 && disputeType != 'A001' #A001 Incorrect Invoice -> skip card
+    actions:
+      - type: message
+        scripting_type: handlebars
+        message: >
+          {
+            "type": "card",
+            "content": {
+                "title": "Dispute Case",
+                "subtitle": "{{dispute_details.value.CaseTitle}}",
+                "imageUrl": "sap-icon://switch-classes",
+                "sections": [
+                  {
+                    "title": "Details: {{dispute_details.value.CaseID}}",
+                    "attributes": [
+                      {
+                        "label": "Business Partner",
+                        "value": "{{dispute_details.value.BusinessPartner}} ({{dispute_details.value.BusinessPartnerFullName}})"
+                      },
+                      {
+                        "label": "Case Priority",
+                        "value": "{{dispute_details.value.CasePriority}} ({{dispute_details.value.DisputeCasePriorityName}})"
+                      },
+                      {
+                        "label": "Case Status",
+                        "value": "{{dispute_details.value.CaseStatus}} ({{dispute_details.value.CaseStatusName}})"
+                      },
+                      {
+                        "label": "Case Reason",
+                        "value": "{{dispute_details.value.CaseReason}} \n({{dispute_details.value.CaseReasonName}})"
+                      },
+                      {
+                        "label": "Disputed Amount",
+                        "value": "{{dispute_details.value.DisputedAmount}} {{dispute_details.value.DisputeCaseCurrency}}"
+                      },
+                      {
+                        "label": "Remaining Disputed Amount",
+                        "value": "{{dispute_details.value.CARemainingDisputedAmount}} {{dispute_details.value.DisputeCaseCurrency}}"
+                      },
+                      {
+                        "label": "Company Code",
+                        "value": "{{dispute_details.value.CompanyCode}} \n({{dispute_details.value.CompanyCodeName}})"
+                      },
+                      {
+                        "label": "Dispute Type",
+                        "value": "{{dispute_details.value.CADisputeType}} ({{dispute_details.value.CADisputeTypeText}})"
+                      }
+                    ]
+                  }
+                ],
+                "buttons": [
+                  {
+                    "type": "navigation",
+                    "title": "Open in App",
+                    "navigation_target": {
+                      "ibnTarget": {
+                        "semanticObject": "CADisputeCase",
+                        "action": "manage"
+                      },
+                      "ibnParams": {
+                        "CaseID": "{{dispute_details.value.CaseID}}"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+
+  - condition: dispute_details.status_code == 200 && disputeType == 'A001' && (disputeStatus != '007' && disputeStatus != '008' && disputeStatus != '009') #A001 Incorrect Invoice -> invoke agent
+    actions:
+      - type: dialog-function 
+        name: agent/invoke_dispute_agent
+        parameters:
+          - name: disputeCaseId
+            value: <? disputeCaseId ?>
+          - name: lastAgentProcessedDisputeCaseId
+            value: <? lastAgentProcessedDisputeCaseId ?>
+          - name: lastAgentQuestionHistoryId
+            value: <? lastAgentQuestionHistoryId ?>
+          - name: agent_id
+            value: <? agent_id_dispute_resolution_agent ?>
+        result_variable: agent_response
+
+      - type: set-variables
+        variables:
+          - name: agentResponseHistoryId
+            value: <? agent_response?.agentQuestionHistoryId ?>
+          - name: agentResponseDisputeCaseId
+            value: <? agent_response?.agentProcessedDisputeCaseId ?>
+          - name : agent_id_dispute_resolution_agent
+            value: "<? agent_response?.agent_id ?>"
+
+  - condition: dispute_details.status_code == 200 && disputeType == 'A002' && (disputeStatus != '007' && disputeStatus != '008' && disputeStatus != '009') #A002 Incorrect Credit
+    actions:
+      - type: message
+        message:
+          type: text
+          content: "I see that the Dispute case <? disputeCaseId ?> is about Incorrect Credit."
+      - type: message
+        message:
+          type: list
+          content:
+            title: "Here are the options to verify dispute:"
+            subtitle: ""
+            enableDetailView: false
+            elements:
+              - title: "Review Open Credits in Contract Accounting"
+                buttons:
+                  - type: postback
+                    title: "Select"
+                    text: "Review Open Credits in Contract Accounting"
+                    value: "Fetch open credits in Contract Accounting for Business Partner <? BusinessPartner ?>"
+              - title: "Review Open Credits in Convergent Invoicing"
+                buttons:
+                  - type: postback
+                    title: "Select"
+                    text: "Review Open Credits in Convergent Invoicing"
+                    value: "Fetch open credit memos in Convergent Invoicing for Business Partner <? BusinessPartner ?>"
+              - title: "Review Completed Dispute Cases"
+                buttons:
+                  - type: postback
+                    title: "Select"
+                    text: "Review Completed Dispute Cases"
+                    value: "Fetch completed dispute cases for Business Partner <? BusinessPartner ?>"
+
+  - condition: dispute_details.status_code == 200 && disputeType == 'A003' && (disputeStatus != '007' && disputeStatus != '008' && disputeStatus != '009') #A003 Missing Credit
+    actions:
+      - type: message
+        message:
+          type: text
+          content: "I see that the Dispute case <? disputeCaseId ?> is about Missing Credit."
+      - type: message
+        message:
+          type: list
+          content:
+            title: "Here are the options to verify dispute:"
+            subtitle: ""
+            enableDetailView: false
+            elements:
+              - title: "Review Open Credits in Contract Accounting"
+                buttons:
+                  - type: postback
+                    title: "Select"
+                    text: "Review Open Credits in Contract Accounting"
+                    value: "Fetch open credits in Contract Accounting for Business Partner <? BusinessPartner ?>"
+              - title: "Review Open Credits in Convergent Invoicing"
+                buttons:
+                  - type: postback
+                    title: "Select"
+                    text: "Review Open Credits in Convergent Invoicing"
+                    value: "Fetch open credit memos in Convergent Invoicing for Business Partner <? BusinessPartner ?>"
+              - title: "Review Completed Dispute Cases"
+                buttons:
+                  - type: postback
+                    title: "Select"
+                    text: "Review Completed Dispute Cases"
+                    value: "Fetch completed dispute cases for Business Partner <? BusinessPartner ?>"
+              - title: "Review the Contract Accounts"
+                buttons:
+                  - type: postback
+                    title: "Select"
+                    text: "Review the Contract Accounts"
+                    value: "Fetch Contract Account Partner details for Business Partner <? BusinessPartner ?>"
+
+  - condition: dispute_details.status_code == 200 && disputeType == 'B001' && (disputeStatus != '007' && disputeStatus != '008' && disputeStatus != '009') #B001 Missing Payment
+    actions:
+      - type: message
+        message:
+          type: text
+          content: "I see that the Dispute case <? disputeCaseId ?> is about Missing Payment."
+      - type: message
+        message:
+          type: list
+          content:
+            title: "Here are the options to verify dispute:"
+            subtitle: ""
+            enableDetailView: false
+            elements:
+              - title: "Review the Contract Accounts"
+                buttons:
+                  - type: postback
+                    title: "Select"
+                    text: "Review the Contract Accounts"
+                    value: "Fetch Contract Account Partner details for Business Partner <? BusinessPartner ?>"
+              - title: "Review Invoices for past 3 months"
+                buttons:
+                  - type: postback
+                    title: "Select"
+                    text: "Review Invoices for past 3 months"
+                    value: "Fetch invoices for last 3 months for Business Partner <? BusinessPartner ?>"
+              - title: "Review Invoicing Documents for past 3 months"
+                buttons:
+                  - type: postback
+                    title: "Select"
+                    text: "Review Invoicing Documents for past 3 months"
+                    value: "Fetch invoicing documents for last 3 months for Business Partner <? BusinessPartner ?>"
+  - condition: dispute_details.status_code == 200 && (disputeStatus == '007' || disputeStatus == '008' || disputeStatus == '009')
+    actions:
+      - type: message
+        message:
+          type: text
+          content: "I see that the Dispute case <? disputeCaseId ?> is about <? disputeTypeText ?> and is already <? caseStatusText ?>. Is there anything else that I can assist you with?"
+
+result:
+  disputeCaseId: <? disputeCaseId ?>
+  caseUUID: <? caseUUID ?>
+  BusinessPartner: <? BusinessPartner ?>
+  disputeType: <? disputeType ?>
+  disputeCaseCurrency: <? disputeCaseCurrency ?>
+  caseStatusProfile: <? caseStatusProfile ?>
+  disputeStatus: <? disputeStatus ?>
+  agentQuestionHistoryId: <? agentResponseHistoryId ?>
+  agentProcessedDisputeCaseId: <? agentResponseDisputeCaseId ?>
+  agent_id_dispute_resolution_agent: <? agent_id_dispute_resolution_agent ?>

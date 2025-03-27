@@ -1,0 +1,34 @@
+parameters:
+  - name: disputeCaseId
+    optional: false
+
+action_groups:
+  - actions:
+      - type: api-request
+        method: GET
+        system_alias: S4HANA_PCE_SSO
+        path: /sap/opu/odata4/sap/api_cadisputecase/srvd_a2x/sap/cadisputecase/0001/DisputeCase?$filter=CaseID%20eq%20%27<? disputeCaseId ?>%27%20&$format=json
+        result_variable: result_dispute
+
+  - condition: result_dispute.status_code == 200 && result_dispute.body.value.size() == 0
+    actions:
+      - type: message
+        message:
+          type: text
+          content: "There was no data found for the dispute case with the ID <? disputeCaseId ?>."
+
+  - condition: result_dispute.status_code != 200
+    actions:
+      - type: message
+        scripting_type: handlebars
+        message:
+          type: illustrated_message
+          content:
+            illustration_name: "Connection"
+            title: "An error occured while retrieving the dispute case."
+            subtitle: "Please try again later."
+
+result:
+  status_code: <? result_dispute.status_code ?>
+  number_of_results: <? result_dispute.body.value.size() ?>
+  value: <? result_dispute.body.value[0] ?>

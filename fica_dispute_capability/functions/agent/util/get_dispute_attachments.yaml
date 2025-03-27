@@ -1,0 +1,130 @@
+parameters:
+  - name: disputeCaseUUID
+    optional: false
+  - name: disputeCaseId
+    optional: false
+
+action_groups:
+  - actions:
+      - type: set-variables
+        variables:
+          - name: number_of_results
+            value: null
+          - name: dispute_attachments
+            value: null
+          - name: wrappedFunctionResponse
+            value: {
+              "functionName": "get_dispute_attachments",
+              "isCalled": true,
+              "hasError": false,
+              "messages": [],
+              "errorMessages": []
+            }
+          - name: messages
+            value: []
+          - name: errorMessages
+            value: []
+          - name: hasError
+            value: false
+      - type: api-request
+        method: GET
+        system_alias: S4HANA_PCE_SSO
+        path: "/sap/opu/odata4/sap/api_cadisputecase/srvd_a2x/sap/cadisputecase/0001/DisputeCase/<? disputeCaseUUID ?>/SAP__self.RetrieveAttachment(CaseAttachmentCreatedByUser='')"
+        result_variable: result_dispute_attachments
+
+  # Handle s/4 errors
+  - condition: result_dispute_attachments.status_code == 400
+    actions:
+      - type: set-variables
+        variables:
+          - name: msg
+            value: "The provided dispute case UUID is invalid."
+          - name: errorMessages
+            value: <? errorMessages.append(result_dispute_attachments.body.error.message) ?>
+          - name: hasError
+            value: true
+
+  ## Handle all other status codes
+  - condition: result_dispute_attachments.status_code != 200 && result_dispute_attachments.status_code != 400
+    actions:
+      - type: set-variables
+        variables:
+          - name: msg
+            value: "Internal Server Error"
+          - name: errorMessages
+            value: <? errorMessages.append(msg) ?>
+          - name: hasError
+            value: true
+      - type: message
+        scripting_type: handlebars
+        message:
+          type: illustrated_message
+          content:
+            illustration_name: "Connection"
+            title: "An error occurred while retrieving attachments of dispute case <? disputeCaseId ?>."
+            subtitle: "Please try again later."
+
+  - condition: result_dispute_attachments.status_code == 200
+    actions:
+      - type: set-variables
+        variables:
+          - name: number_of_results
+            value: <? result_dispute_attachments.body.value.size() ?>
+
+  - condition: number_of_results == 0
+    actions:
+      - type: set-variables
+        variables:
+          - name: msg
+            value: "No attachments found for the Dispute case <? disputeCaseId ?>."
+          - name: messages
+            value: <? messages.append(msg) ?>
+      - type: status-update
+        message: <? msg ?>          
+
+  - condition: number_of_results != null && number_of_results > 0
+    actions:
+      - type: set-variables
+        variables:
+          - name: msg
+            value: "Retrieved <? number_of_results ?> attachments for Dispute case <? disputeCaseId ?>"
+          - name: messages
+            value: <? messages.append(msg) ?>
+      - type: set-variables
+        scripting_type: handlebars
+        variables:
+          - name: dispute_attachments
+            value: >
+              [
+              {{#eachJoin result_dispute_attachments.body.value}}
+                {{#if (eq this.MimeType "application/pdf")}}
+                {
+                  "name": "disputeAttachment/{{this.CaseAttachmentName}}",
+                  "base64Content": "{{this.CaseAttachmentContentBinary}}"
+                }
+                {{/if}}
+              {{/eachJoin}}
+              ]
+
+  - actions:
+      - type: set-variables
+        scripting_type: handlebars
+        variables:
+          - name: wrappedFunctionResponse
+            value: "{{ setValue wrappedFunctionResponse 'hasError' hasError }}"
+      - type: set-variables
+        scripting_type: handlebars
+        variables:
+          - name: wrappedFunctionResponse
+            value: "{{ setValue wrappedFunctionResponse 'messages' messages }}"
+      - type: set-variables
+        scripting_type: handlebars
+        variables:
+          - name: wrappedFunctionResponse
+            value: "{{ setValue wrappedFunctionResponse 'errorMessages' errorMessages }}"
+
+result:
+  status_code: <? result_dispute_attachments.status_code ?>
+  number_of_results: <? number_of_results ?>
+  value: <? dispute_attachments ?>
+  wrappedFunctionResponse: <? wrappedFunctionResponse ?>

@@ -1,0 +1,11 @@
+variables:
+  - name: disputeCaseId
+  - name: lastAgentQuestionHistoryId
+  - name: lastAgentProcessedDisputeCaseId
+  - name: caseUUID
+  - name: BusinessPartner
+  - name: disputeType
+  - name: caseStatusProfile
+  - name: disputeCaseCurrency
+  - name: disputeStatus
+  - name: agent_id_dispute_resolution_agent

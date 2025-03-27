@@ -1,0 +1,24 @@
+description: This function fetches open credit memos for a Business Partner. These credit memos are from Convergent Invoicing (CI).
+
+slots:
+  - name: BusinessPartner_ui
+    description: Business Partner to fetch open credit memos in Convergent Invoicing.
+
+target:
+  type: function
+  name: disputeCase/fetch_ci_open_credits
+  parameters:
+    - name: BusinessPartner
+      value: $capability_context.BusinessPartner
+    - name: disputeType
+      value: $capability_context.disputeType
+
+visibility_condition:
+  objects:
+    - type: ibn_targets
+      match: ALL
+      intents:
+        - semantic_object: CADisputeCase
+          action: manage
+        - semantic_object: CABillgReqDocument
+          action: manage

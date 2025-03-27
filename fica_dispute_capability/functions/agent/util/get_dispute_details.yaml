@@ -1,0 +1,110 @@
+parameters:
+  - name: disputeCaseId
+    optional: false
+  - name: suppress_success_message
+    optional: true
+
+action_groups:
+  - actions:
+      - type: set-variables
+        variables:
+          - name: number_of_results
+            value: null
+          - name: dispute_case_details
+            value: null
+          - name: wrappedFunctionResponse
+            value: {
+              "functionName": "get_dispute_details",
+              "isCalled": true,
+              "hasError": false,
+              "messages": [],
+              "errorMessages": []
+            }
+          - name: messages
+            value: []
+          - name: errorMessages
+            value: []
+          - name: hasError
+            value: false
+      - type: api-request
+        method: GET
+        system_alias: S4HANA_PCE_SSO
+        path: "/sap/opu/odata4/sap/api_cadisputecase/srvd_a2x/sap/cadisputecase/0001/DisputeCase?$filter=CaseID%20eq%20%27<? disputeCaseId ?>%27%20&$format=json"
+        result_variable: result_dispute
+
+  - condition: result_dispute.status_code != 200
+    actions:
+      - type: set-variables
+        variables:
+          - name: msg
+            value: "Internal Server Error"
+          - name: errorMessages
+            value: <? errorMessages.append(msg) ?>
+          - name: hasError
+            value: true
+      - type: message
+        scripting_type: handlebars
+        message:
+          type: illustrated_message
+          content:
+            illustration_name: "Connection"
+            title: "An error occurred while retrieving Dispute case <? disputeCaseId ?>."
+            subtitle: "Please try again later."
+
+  - condition: result_dispute.status_code == 200
+    actions:
+      - type: set-variables
+        variables:
+          - name: number_of_results
+            value: <? result_dispute.body.value.size() ?>
+
+  - condition: number_of_results == 0
+    actions:
+      - type: set-variables
+        variables:
+          - name: msg
+            value: "There was no detail data found for Dispute case <? disputeCaseId ?>."
+          - name: errorMessages
+            value: <? errorMessages.append(msg) ?>
+          - name: hasError
+            value: true
+      - type: status-update
+        message: <? msg ?>            
+
+  - condition: number_of_results == 1
+    actions:
+      - type: set-variables
+        variables:
+          - name: dispute_case_details
+            value: <? result_dispute.body.value[0] ?>
+          - name: msg
+            value: "The dispute case <? disputeCaseId ?> is about '<? result_dispute.body.value[0].CADisputeTypeText ?>', '<? result_dispute.body.value[0].CaseReasonName ?>' with a disputed amount of <? result_dispute.body.value[0].DisputedAmount ?> <? result_dispute.body.value[0].DisputeCaseCurrency ?>."
+          - name: messages
+            value: <? messages.append(msg) ?>
+  - condition: number_of_results == 1 && suppress_success_message != "true"  #don't show the message if called from credit memo activities
+    actions:
+      - type: status-update
+        message: <? msg ?>
+
+  - actions:
+      - type: set-variables
+        scripting_type: handlebars
+        variables:
+          - name: wrappedFunctionResponse
+            value: "{{ setValue wrappedFunctionResponse 'hasError' hasError }}"
+      - type: set-variables
+        scripting_type: handlebars
+        variables:
+          - name: wrappedFunctionResponse
+            value: "{{ setValue wrappedFunctionResponse 'messages' messages }}"
+      - type: set-variables
+        scripting_type: handlebars
+        variables:
+          - name: wrappedFunctionResponse
+            value: "{{ setValue wrappedFunctionResponse 'errorMessages' errorMessages }}"
+
+result:
+  status_code: "<? result_dispute.status_code ?>"
+  number_of_results: "<? number_of_results ?>"
+  value: "<? dispute_case_details ?>"
+  wrappedFunctionResponse: <? wrappedFunctionResponse ?>

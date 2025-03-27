@@ -1,0 +1,208 @@
+parameters:
+  - name: disputeCaseId_ui
+    optional: true
+  - name: disputeCaseId
+    optional: true
+  - name: caseUUID
+    optional: true
+  - name: BusinessPartner
+    optional: true
+  - name: disputeStatus #CaseSystemStatus
+    optional: true
+  - name: disputeType
+    optional: true
+
+action_groups:
+  - condition: disputeCaseId == null
+    actions:
+      - type: dialog-function
+        name: util/variable_handling
+        parameters:
+          - name: scenario
+            value: "dispute_resolution"
+          - name: disputeCaseId_ui
+            value: <? disputeCaseId_ui ?>
+          - name: disputeCaseId
+            value: <? disputeCaseId ?>
+        result_variable: handle_result
+      - type: set-variables
+        variables:
+          - name: disputeCaseId
+            value: <? handle_result.disputeCaseId ?>
+
+  - condition: (caseUUID == null || disputeStatus == null) && disputeCaseId != null
+    actions:
+      - type: dialog-function
+        name: util/get_dispute_details
+        parameters:
+          - name: disputeCaseId
+            value: <? disputeCaseId ?>
+        result_variable: dispute_details
+      - type: set-variables
+        variables:
+          - name: caseUUID
+            value: <? dispute_details.value.CaseUUID ?>
+          - name: disputeStatus
+            value: <? dispute_details.value.CaseSystemStatus ?>
+          - name: disputeType
+            value: <? dispute_details.value.CADisputeType ?>
+
+  - actions:
+      - type: set-variables
+        variables:
+          - name: disputeNewStatus
+            value: null
+
+  - condition: disputeStatus == '001' #New
+    actions:
+      - type: api-request
+        method: GET
+        system_alias: S4HANA_PCE_SSO
+        path: /sap/opu/odata/sap/O2C_FICA_DISPUTE_MANAGE_SRV/I_CACaseStatusVH?$format=json&$filter=CaseSystemStatus%20eq%20%27002%27 #002=Being Processed
+        result_variable: result_casestatus
+  - condition: disputeStatus == '001' && result_casestatus.status_code == 200 && result_casestatus.body.d.results.size() == 0
+    actions:
+      - type: message
+        message:
+          type: text
+          content: "The dispute case cannot be processed as it cannot be set to 'In Process' status."
+  - condition: disputeStatus == '001' && result_casestatus.status_code == 200 && result_casestatus.body.d.results.size() != 0
+    actions:
+      - type: set-variables
+        variables:
+          - name: CaseStatus
+            value: <? result_casestatus.body.d.results[0].CaseStatus ?>
+      - type: api-request
+        method: PATCH
+        headers:
+          content-type: application/json
+        system_alias: S4HANA_PCE_SSO
+        path: /sap/opu/odata4/sap/api_cadisputecase/srvd_a2x/sap/cadisputecase/0001/DisputeCase(<? caseUUID ?>)
+        body: { "CaseStatus": "<? CaseStatus ?>" }
+        result_variable: result_settoinprocess
+      - type: set-variables
+        variables:
+          - name: disputeNewStatus
+            value: <? result_settoinprocess.body.CaseSystemStatus ?>
+
+  - condition: (disputeStatus == '002' || disputeNewStatus == '002') && disputeType == 'A003' #Missing Credit
+    actions:
+      - type: message
+        message:
+          type: list
+          content:
+            title: "To resolve the dispute, choose from the following options:"
+            subtitle: ""
+            enableDetailView: false
+            elements:
+              - title: "Update the Contract Account"
+                buttons:
+                  - type: navigation
+                    title: "Open" #F5474
+                    navigation_target:
+                      ibnTarget:
+                        semanticObject: "ContractAccount"
+                        action: "enterEntryPage"
+                      ibnParams:
+                        "BusinessPartner": "<? BusinessPartner ?>"
+              - title: "Create Credit"
+                buttons:
+                  - type: navigation
+                    title: "Open" #FPE1
+                    navigation_target:
+                      ibnTarget:
+                        semanticObject: "CADocument"
+                        action: "create"
+              - title: "Assign Credit to the Dispute Case"
+                buttons:
+                  - type: postback
+                    title: "Select"
+                    text: "Assign Credit to the Dispute Case"
+                    value: "Fetch the not disputed credits for dispute case"
+
+  - condition: (disputeStatus == '002' || disputeNewStatus == '002') && (disputeType == 'A002') #Incorrect Credit
+    actions:
+      - type: message
+        message:
+          type: list
+          content:
+            title: "To resolve the dispute, you may post a credit in Contract Accounting"
+            subtitle: ""
+            enableDetailView: false
+            elements:
+              - title: "Create Credit"
+                buttons:
+                  - type: navigation
+                    title: "Open" #FPE1
+                    navigation_target:
+                      ibnTarget:
+                        semanticObject: "CADocument"
+                        action: "create"
+              - title: "Assign Credit to the Dispute Case"
+                buttons:
+                  - type: postback
+                    title: "Select"
+                    text: "Assign Credit to the Dispute Case"
+                    value: "Fetch the not disputed credits for dispute case"
+
+  - condition: (disputeStatus == '002' || disputeNewStatus == '002') && (disputeType == 'B001') #Missing Payment
+    actions:
+      - type: message
+        message:
+          type: list
+          content:
+            title: "To resolve the dispute, you can either create a new payment or reset clearing and then assign payment to the correct invoice"
+            subtitle: ""
+            enableDetailView: false
+            elements:
+              - title: "Create or process Payment Lot"
+                buttons:
+                  - type: navigation
+                    title: "Open" #FP05
+                    navigation_target:
+                      ibnTarget:
+                        semanticObject: CAPaymentLot
+                        action: process
+              - title: "Reset Clearing"
+                buttons:
+                  - type: navigation
+                    title: "Open" #FP07
+                    navigation_target:
+                      ibnTarget:
+                        semanticObject: CAClearingDocument
+                        action: resetClearing
+              - title: "- Reprocess Payment in Payment Lot"
+                buttons:
+                  - type: navigation
+                    title: "Open" #FPCPL
+                    navigation_target:
+                      ibnTarget:
+                        semanticObject: CAPaymentLot
+                        action: processClarifications
+              - title: "- Select Open Items to Clear"
+                buttons:
+                  - type: navigation
+                    title: "Open" #FP06
+                    navigation_target:
+                      ibnTarget:
+                        semanticObject: CAAccountMaintenance
+                        action: process
+              - title: "Assign Payment to the Dispute Case"
+                buttons:
+                  - type: postback
+                    title: "Select"
+                    text: "Assign Payment to the Dispute Case"
+                    value: "Fetch the not disputed credits for dispute case"
+  - condition: disputeStatus == '001' && disputeNewStatus == null
+    actions:
+      - type: message
+        message:
+          type: text
+          content: "The dispute case cannot be processed as it cannot be set to 'In Process' status."
+
+  - condition: disputeStatus == '007' || disputeStatus == '008' || disputeStatus == '009' #007-Closed, 008-Confirmed, 009-Voided/Deleted/Cancelled
+    actions:
+      - type: message
+        message:
+          type: text
+          content: "Dispute <? disputeCaseId ?> has already been closed or voided. It cannot be processed further."

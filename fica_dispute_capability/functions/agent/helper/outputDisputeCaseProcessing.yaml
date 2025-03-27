@@ -1,0 +1,96 @@
+
+# Output in Joule, show Dispute Case data and analysis on UI5 Card 
+parameters:
+  - name: disputeCaseId
+    optional: false
+  - name: disputeDetails
+    optional: false
+
+action_groups:
+
+  - actions:
+
+      - type: set-variables
+        scripting_type: handlebars 
+        variables:
+        - name: analysis_text
+          value: "{{default disputeDetails.msg disputeDetails}}"  # agent response json might miss msg property
+
+      # sometimes PAB response adds ```txt markdown, confuses output, so remove block begin
+      - type: set-variables
+        scripting_type: handlebars 
+        variables:
+        - name: analysis_text
+          value: "{{remove analysisText '```txt'}}"  
+      
+      # ```txt markdown remove end of block
+      - type: set-variables
+        scripting_type: handlebars 
+        variables:
+        - name: analysis_text
+          value: "{{remove analysisText '```'}}"  
+          
+        - name: jsonForCardOutput
+          # agent response msg can contain values in quotes (") which would break the card rendering, note escape function in card rendering below
+          value: >
+            {
+              "type": "card",
+              "content": {
+                  "title": "Dispute Case Resolution",
+                  "subtitle": "Summary of resolution processing",
+                  "imageUrl": "sap-icon://switch-classes",
+                  "sections": [
+                    {
+                      "title": "Dispute Case Id {{default disputeDetails.disputeCaseId disputeCaseId}}",
+                      "attributes": [
+                        {
+                          "label": "Analysis",
+                          "value": "{{ escape analysis_text }}"
+                        },                      
+                        {
+                          "label": "Business Partner",
+                          "value": "{{default disputeDetails.businessPartnerFullName "<N/A>"}}"
+                        },
+                        {
+                          "label": "Case Status",
+                          "value": "{{default disputeDetails.disputeCaseStatusText "<N/A>"}}"
+                        },
+                        {
+                          "label": "Disputed Amount",
+                          "value": "{{default disputeDetails.disputedAmount "<N/A>"}} {{default disputeDetails.disputeCaseCurrency ""}}"
+                        },
+                        {
+                          "label": "Disputed invoice",
+                          "value": "{{default disputeDetails.invoiceId "<N/A>"}}"
+                        }
+                      ]
+                    }
+                  ],
+                  "buttons": [
+                    {
+                      "type": "navigation",
+                      "title": "Open in App",
+                      "navigation_target": {
+                        "ibnTarget": {
+                          "semanticObject": "CADisputeCase",
+                          "action": "manage"
+                        },
+                        "ibnParams": {
+                          "CaseID": "{{default disputeDetails.disputeCaseId "<N/A>"}}"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+
+
+      # alternative way of outputting disputeDetails as text message
+      #- type: message 
+      #  message: >
+      #    type: text
+      #    content: "<? disputeDetails ?>"
+      #    markdown: true
+
+      - type: message
+        message: <? jsonForCardOutput ?>

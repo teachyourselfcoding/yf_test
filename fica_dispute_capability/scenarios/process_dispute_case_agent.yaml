@@ -1,0 +1,166 @@
+description: >
+              This scenario can analyze dispute cases, suggest resolutions and process actions to resolve a dispute.
+              The processing can require confirmation, when taking action steps to resolve disputes. The possible steps for confirmation are "Proceed with processing" and "Cancel processing".
+              To "Cancel processing" the scenario has to be executed.
+              
+
+slots:
+  - name: disputeCaseId
+    description: A Dispute Case Id identifies a Dispute Case in a unique way. 
+  - name: approval
+    description: The user's answer to the agents question to continue dispute case processing or to cancel the work on dispute case processing. The values should be either "yes" or "no".
+
+target:
+  type: function
+  name: agent/invoke_dispute_agent
+  parameters:   # <-- validation that no slot with same name is defined
+    - name: lastAgentQuestionHistoryId
+      value: $capability_context.lastAgentQuestionHistoryId  # hand over response from HITL step
+    - name: lastAgentProcessedDisputeCaseId
+      value: $capability_context.lastAgentProcessedDisputeCaseId  # hand over dispute Case Id from HITL step
+    - name: agent_id
+      value: $capability_context.agent_id_dispute_resolution_agent  # hand over agent id, workaround for agent_id not in system_context
+
+capability_context:
+  - name: lastAgentQuestionHistoryId
+    value: $target_result.agentQuestionHistoryId  # store response of current step for use in next step (only if HITL)
+  - name: lastAgentProcessedDisputeCaseId
+    value: $target_result.agentProcessedDisputeCaseId  # store dispute case id of last agent processed dialog step
+  - name: agent_id_dispute_resolution_agent
+    value: $target_result.agent_id
+
+agent_config: >
+  {
+    "name": "dispute_agent",
+    "type": "smart",
+    "safetyCheck": false,
+    "expertIn": "\n        You are an expert in financial dispute case resolution with a focus on reconciling invoiced amounts against contract terms.  \n        Your responsibilities include:\n            – Retrieving and reviewing dispute cases along with associated invoiced amounts and contract attachments.  \n            – Recalculating invoice amounts based on the contractual terms.\n            – Identifying valid discrepancies by comparing the recalculated amounts to the actual invoices.  \n            – Creating and processing credit memos through established tools.\n        ",
+    "initialInstructions": "\n            ─────────────────────────────  \n            Step-by-Step Instructions:  \n            ─────────────────────────────  \n            \n        1. Data Retrieval\n          - Retrieve all necessary information from the dispute case.\n          - Verify that all required details related to the dispute case are present (i.e., `disputedAmount`, `disputedCaseCurrency`, `invoiceLineItems`, `disputeStatus`, `disputeNotes`) and the contract attachment.\n          - Ensure that `invoiceLineItems` contains `DocumentDueDate`, `ContractID`, `AmountInTransactionCurrency`, `TransactionCurrency`, `TaxRateInPercent`.\n\n        2. Invoice Recalculation  \n           1) Identify the `DocumentDueDate` for which the invoice should be recalculated.  \n           2) Recalculate the invoice amount (`recalculatedInvoiceAmount`) strictly based on the contract terms specified in the contract attachment for the given `DocumentDueDate`.  \n\n        3. Invoice Amount Comparison\n          - Calculate the `discrepancy` between the `recalculatedInvoiceAmount` and the original invoice amount (`AmountInTransactionCurrency`).\n          - If the `discrepancy` (considering currency and rounding) is unequal to zero:\n            → Proceed to Step 4.\n          - Else if the `discrepancy` is zero (no difference):\n            → Inform that there is no difference found in invoice and the corresponding contract, question the validity of the dispute case, and proceed to Step 7.\n\n        4. Compare Discrepancy to Disputed Amount\n          - Since the `disputedAmount` does contain taxes and the `discrepancy` does not, adjust the `discrepancy` by applying the tax rate (`TaxRateInPercent?), i.e. discrepancyWithTax = discrepancy * (1 + TaxRateInPercent / 100)\n          - Compare the `discrepancyWithTax` to the `disputedAmount`.\n          - If the `discrepancyWithTax` exactly matches the `disputedAmount`:\n            → Proceed to Step 5.\n          - Else if the `discrepancyWithTax` does not match the `disputedAmount`:\n            → Inform that the dispute case cannot be handled due to a discrepancy mismatch and proceed to Step 7.\n\n        5. Create the Credit Memo with the verified `discrepancyWithTax` amount.\n\n        6. Close Dispute Case to finalize the process.  \n\n        7. Generate a final response that summarizes the actions taken and the findings.\n        \n\n            ─────────────────────────────  \n            Constraints:  \n            ─────────────────────────────  \n            \n        • If the currency is unspecified or inconsistent across documents, provide an error message indicating a currency discrepancy.\n        • If the contract text is missing or unreadable, provide an error message indicating that the dispute case cannot proceed due to incomplete or invalid contract information.  \n        • Rely strictly on the contract (attachment) text to determine the correct invoice amount for the specific due date (DocumentDueDate). If information cannot be retrieved or is unreadable, stop processing and reply with an appropriate message. Do not infer or generate missing details from other sources.\n        • Only consider dispute cases where the currency in contract, invoice and dispute case are consistent. If there is a discrepancy in currency, output an error message and do not proceed with the dispute case.\n        • If the recalculation reveals either no discrepancy or a discrepancy that does not exactly match the disputed amount, you must output an appropriate message indicating that you cannot handle the dispute case.\n        • Strictly use the calculator tool for all numerical computations and comparisons.\n        • Perform all calculations using amounts that exclude taxes.\n        \n\n            ─────────────────────────────  \n            Operational Considerations:  \n            ─────────────────────────────  \n            \n        • Maintain clear and concise language throughout the process.\n        • Ensure that all amounts are displayed with the correct currency symbol.\n        • Ensure that all amounts clearly indicate whether they include taxes or not.\n        • The `disputedAmount` includes taxes, while the `amountInTransactionCurrency` and the `recalculatedInvoiceAmount` do not.\n        \n\n            ─────────────────────────────  \n            Error Handling:  \n            ─────────────────────────────  \n            \n        • If the recalculated invoice amount does not differ from the original invoice amount, clearly state that there is \"no difference\" and question the validity of the dispute case.\n        • If a discrepancy exists but does not match the disputed amount exactly, output a message stating that “these types of dispute cases cannot be handled” and do not attempt to create a credit memo.\n        • If any calculation error or input inconsistency arises, provide a clear error message outlining which part of the process failed or mismatched.\n        • Use positive language and clear guidance to help the user understand the next steps in case of any errors.\n        \n\n            ─────────────────────────────  \n            Examples:  \n            ─────────────────────────────  \n            \n        • Example 1 (Valid Dispute Case):\n        - AmountInTransactionCurrency: “€210”\n        - recalculatedInvoiceAmount: “€204.00”\n        - TaxRateInPercent: 19%\n        - discrepancy: “€6”\n        - discrepancyWithTax: “€7.14”\n        - disputedAmount: “€7.14”\n        - Since the discrepancy of €7.14 exactly matches the disputed amount, the dispute case is valid.\n        • Example 2 (Invalid Dispute Case – No Discrepancy):\n        - AmountInTransactionCurrency: “€150”\n        - recalculatedInvoiceAmount: “€150”\n        - discrepancy: “€0”\n        - Since there is no discrepancy, the dispute case is invalid.\n        • Example 3 (Invalid Dispute Case – Discrepancy Mismatch):\n        - AmountInTransactionCurrency: “€500”\n        - recalculatedInvoiceAmount: “€490”\n        - TaxRateInPercent: 15%\n        - discrepancy: “€10”\n        - discrepancyWithTax: “€11.50”\n        - disputedAmount: “€12”\n        - Since the discrepancy of €11.50 does not match the disputed amount of €12, the dispute case is invalid.\n        \n\n            ",
+    "iterations": 100,
+    "mode": "balanced",
+    "baseModel": "OpenAiGpt4o",
+    "advancedModel": "OpenAiGpt4o",
+    "preprocessingEnabled": true,
+    "postprocessingEnabled": true,
+    "defaultOutputFormat": "Markdown",
+    "defaultOutputFormatOptions": null,
+    "tools": [
+      {
+        "name": "fetch_dispute_case_data_tool",
+        "type": "joulefunction",
+        "config": [
+          {
+            "name": "capabilityName",
+            "value": "trans_fica_dispute_agent_capability"
+          },
+          {
+            "name": "capabilityNamespace",
+            "value": "com.sap.s4hana.pcp.trans"
+          },
+          {
+            "name": "functionName",
+            "value": "agent/agentTools/fetch_dispute_case_data"
+          },
+          {
+            "name": "humanApproval",
+            "value": "false"
+          },
+          {
+            "name": "humanApprovalMessageFormattingPrompt",
+            "value": ""
+          }
+        ],
+        "resources": [
+          {
+            "name": "Input parameters schema",
+            "description": "JSON Schema that describes the input parameters of the Joule function",
+            "contentType": "application/json",
+            "data": "eyJkZXNjcmlwdGlvbiI6ICJUb29sIGZvciBmZXRjaGluZyBkaXNwdXRlIGRhdGEsIGNvbnRyYWN0IGRhdGEsIGFuZCBpbnZvaWNlIGRhdGEiLCAicHJvcGVydGllcyI6IHsiZGlzcHV0ZUNhc2VJZCI6IHsiZGVzY3JpcHRpb24iOiAiRGlzcHV0ZSBDYXNlIElEIiwgInRpdGxlIjogIkRpc3B1dGVjYXNlaWQiLCAidHlwZSI6ICJzdHJpbmcifX0sICJyZXF1aXJlZCI6IFsiZGlzcHV0ZUNhc2VJZCJdLCAidGl0bGUiOiAiRmV0Y2hEaXNwdXRlQ2FzZURhdGEiLCAidHlwZSI6ICJvYmplY3QifQ==",
+            "metadata": null
+          }
+        ]
+      },
+      {
+        "name": "release_credit_memo_close_dc_tool",
+        "type": "joulefunction",
+        "config": [
+          {
+            "name": "capabilityName",
+            "value": "trans_fica_dispute_agent_capability"
+          },
+          {
+            "name": "capabilityNamespace",
+            "value": "com.sap.s4hana.pcp.trans"
+          },
+          {
+            "name": "functionName",
+            "value": "agent/agentTools/release_credit_memo_close_dc"
+          },
+          {
+            "name": "humanApproval",
+            "value": "true"
+          },
+          {
+            "name": "humanApprovalMessageFormattingPrompt",
+            "value": "\n        The agent should provide a clear summary of the recently taken steps, and the recommended actions that he asks the user to confirm.\n        \n        The message should be delivered with clear sections similar to the following format:\n        \n        \n        I created a credit memo [credit memo id] over [Amount] and added a note about this action to the dispute case.\n        \n        Do you want me to go ahead, release the credit memo and closing the dispute case?\n        "
+          }
+        ],
+        "resources": [
+          {
+            "name": "Input parameters schema",
+            "description": "JSON Schema that describes the input parameters of the Joule function",
+            "contentType": "application/json",
+            "data": "eyJkZXNjcmlwdGlvbiI6ICJUb29sIGZvciByZWxlYXNpbmcgdGhlIGNyZWRpdCBtZW1vIGFuZCBjbG9zaW5nIHRoZSBkaXNwdXRlIGNhc2UiLCAicHJvcGVydGllcyI6IHsiZGlzcHV0ZUNhc2VJZCI6IHsiZGVzY3JpcHRpb24iOiAiVGhlIGRpc3B1dGUgY2FzZSBJRCIsICJ0aXRsZSI6ICJEaXNwdXRlY2FzZWlkIiwgInR5cGUiOiAic3RyaW5nIn0sICJjcmVkaXRNZW1vSWQiOiB7ImRlc2NyaXB0aW9uIjogIlRoZSBjcmVkaXQgbWVtbyBJRCIsICJ0aXRsZSI6ICJDcmVkaXRtZW1vaWQiLCAidHlwZSI6ICJzdHJpbmcifX0sICJyZXF1aXJlZCI6IFsiZGlzcHV0ZUNhc2VJZCIsICJjcmVkaXRNZW1vSWQiXSwgInRpdGxlIjogIlJlbGVhc2VDcmVkaXRNZW1vQ2xvc2VEQyIsICJ0eXBlIjogIm9iamVjdCJ9",
+            "metadata": null
+          }
+        ]
+      },
+      {
+        "name": "Human_Tool",
+        "type": "human",
+        "config": [],
+        "resources": []
+      },
+      {
+        "name": "Calculator_Tool",
+        "type": "calculator",
+        "config": [],
+        "resources": []
+      },
+      {
+        "name": "create_credit_memo_process_dc_tool",
+        "type": "joulefunction",
+        "config": [
+          {
+            "name": "capabilityName",
+            "value": "trans_fica_dispute_agent_capability"
+          },
+          {
+            "name": "capabilityNamespace",
+            "value": "com.sap.s4hana.pcp.trans"
+          },
+          {
+            "name": "functionName",
+            "value": "agent/agentTools/create_credit_memo_process_dc"
+          },
+          {
+            "name": "humanApproval",
+            "value": "true"
+          },
+          {
+            "name": "humanApprovalMessageFormattingPrompt",
+            "value": "The agent should provide a clear summary of the details identified in the dispute case, the steps already taken, and the recommended actions that he asks the user to confirm.\n        \nThe message should be delivered with clear sections similar to the following format:\n\n        --------------------------------------------------  \n        #### Dispute Case: [CaseID]\n\n        ##### Overview  \n        Dispute Case [CaseID] involves a discrepancy between the recalculated invoice amount and the original invoice amount based on the contract (attachment).\n\n        ##### I could identify a discrepancy:  \n        - Recalculated Invoice Amount: [€Amount]  \n        - Original Invoice Amount: [€Amount]  \n        - Disputed Amount: [€Amount]\n\n        ##### Finding:  \n        The discrepancy of [discrepancy amount] has been confirmed to match the disputed amount.\n\n        ##### I recommend:  \n        • Create a credit memo over [Amount] for that contract account.  \n\n        Would you like to proceed with this action?\n        "
+          }
+        ],
+        "resources": [
+          {
+            "name": "Input parameters schema",
+            "description": "JSON Schema that describes the input parameters of the Joule function",
+            "contentType": "application/json",
+            "data": "eyJkZXNjcmlwdGlvbiI6ICJUb29sIGZvciBjcmVhdGluZyBhIGNyZWRpdCBtZW1vLCBzZXR0aW5nIGl0cyBzdGF0dXMgdG8gXCJGb3JDaGVja2luZ1wiLCB1cGRhdGluZyB0aGUgZGlzcHV0ZSBjYXNlIHN0YXR1cyB0byBcIkJlaW5nIFByb2Nlc3NlZFwiLCBhbmQgYXNzaWduaW5nIGEgbm90ZSB0byB0aGUgZGlzcHV0ZSBjYXNlIHdpdGggYSBsaW5rIHRvIHRoZSBiaWxsaW5nIHJlcXVlc3QiLCAicHJvcGVydGllcyI6IHsiaW52b2ljZUlkIjogeyJkZXNjcmlwdGlvbiI6ICJUaGUgaW52b2ljZSBJRCIsICJ0aXRsZSI6ICJJbnZvaWNlaWQiLCAidHlwZSI6ICJzdHJpbmcifSwgImRlc2NyaXB0aW9uIjogeyJkZXNjcmlwdGlvbiI6ICJUaGUgZGVzY3JpcHRpb24gb2YgdGhlIGNyZWRpdCBtZW1vIChkbyBub3QgZ28gb3ZlciBhIG1heGltdW0gb2YgNjAgY2hhcmFjdGVycyBhcyB0aGlzIHdpbGwgcmVzdWx0IGluIGFuIGVycm9yKSIsICJ0aXRsZSI6ICJEZXNjcmlwdGlvbiIsICJ0eXBlIjogInN0cmluZyJ9LCAiYW1vdW50IjogeyJkZXNjcmlwdGlvbiI6ICJUaGUgYW1vdW50IG9mIHRoZSBjcmVkaXQgbWVtbyIsICJ0aXRsZSI6ICJBbW91bnQiLCAidHlwZSI6ICJzdHJpbmcifSwgImN1cnJlbmN5Q29kZSI6IHsiZGVzY3JpcHRpb24iOiAiVGhlIGFscGhhYmV0aWMgY3VycmVuY3kgY29kZSBvZiB0aGUgY3JlZGl0IG1lbW8gZm9sbG93aW5nIElTTyA0MjE3IHN0YW5kYXJkIChlLmcuIFVTRCwgRVVSKSIsICJ0aXRsZSI6ICJDdXJyZW5jeWNvZGUiLCAidHlwZSI6ICJzdHJpbmcifSwgImRpc3B1dGVDYXNlSWQiOiB7ImRlc2NyaXB0aW9uIjogIlRoZSBkaXNwdXRlIGNhc2UgSUQiLCAidGl0bGUiOiAiRGlzcHV0ZWNhc2VpZCIsICJ0eXBlIjogInN0cmluZyJ9fSwgInJlcXVpcmVkIjogWyJpbnZvaWNlSWQiLCAiZGVzY3JpcHRpb24iLCAiYW1vdW50IiwgImN1cnJlbmN5Q29kZSIsICJkaXNwdXRlQ2FzZUlkIl0sICJ0aXRsZSI6ICJDcmVhdGVDcmVkaXRNZW1vUHJvY2Vzc0RDIiwgInR5cGUiOiAib2JqZWN0In0=",
+            "metadata": null
+          }
+        ]
+      }
+    ]
+  }

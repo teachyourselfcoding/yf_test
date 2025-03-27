@@ -1,0 +1,99 @@
+parameters:
+  - name: disputeCaseId_ui
+    optional: true
+  - name: disputeCaseId
+    optional: true
+  - name: caseUUID
+    optional: true
+
+action_groups:
+  - condition: disputeCaseId == null
+    actions:
+      - type: dialog-function
+        name: util/variable_handling
+        parameters:
+          - name: scenario
+            value: "close_dispute"
+          - name: disputeCaseId_ui
+            value: <? disputeCaseId_ui ?>
+          - name: disputeCaseId
+            value: <? disputeCaseId ?>
+        result_variable: handle_result
+      - type: set-variables
+        variables:
+          - name: disputeCaseId
+            value: <? handle_result.disputeCaseId ?>
+
+  - condition: caseUUID == null && disputeCaseId != null
+    actions:
+      - type: dialog-function
+        name: util/get_dispute_details
+        parameters:
+          - name: disputeCaseId
+            value: <? disputeCaseId ?>
+        result_variable: dispute_details
+      - type: set-variables
+        variables:
+          - name: caseUUID
+            value: <? dispute_details.value.CaseUUID ?>
+
+  - condition: caseUUID != null
+    actions:
+      - type: api-request
+        method: GET
+        system_alias: S4HANA_PCE_SSO
+        path: /sap/opu/odata/sap/O2C_FICA_DISPUTE_MANAGE_SRV/I_CACaseStatusVH?$format=json&$filter=CaseSystemStatus%20eq%20%27007%27 #007=Closed
+        result_variable: result_casestatus
+
+  - condition: result_casestatus.status_code == 200 && result_casestatus.body.d.results.size() != 0
+    actions:
+      - type: set-variables
+        variables:
+          - name: CaseStatus
+            value: <? result_casestatus.body.d.results[0].CaseStatus ?>
+
+  - condition: result_casestatus.status_code == 200 && result_casestatus.body.d.results.size() == 0
+    actions:
+      - type: message
+        message:
+          type: text
+          content: "No case statuses were found for the system status 'Closed'. Therefore, the dispute case cannot be closed."
+
+  - condition: result_casestatus.status_code == 200 && result_casestatus.body.d.results.size() != 0
+    actions:
+      - type: api-request
+        method: PATCH
+        headers:
+          content-type: application/json
+        system_alias: S4HANA_PCE_SSO
+        path: /sap/opu/odata4/sap/api_cadisputecase/srvd_a2x/sap/cadisputecase/0001/DisputeCase(<? caseUUID ?>)
+        body: { "CaseStatus": "<? CaseStatus ?>" }
+        result_variable: result_close_dispute
+
+  - condition: result_close_dispute.status_code == 200
+    actions:
+      - type: message
+        message:
+          type: text
+          content: "The dispute case with the ID <? disputeCaseId ?> was closed successfully."
+      - type: message
+        message:
+          type: buttons
+          content:
+            title: "Would you like to view the dispute case?"
+            buttons:
+              - type: navigation
+                title: "Open in App"
+                navigation_target:
+                  ibnTarget:
+                    semanticObject: "CADisputeCase"
+                    action: "manage"
+                  ibnParams:
+                    "CaseID": "<? disputeCaseId ?>"
+
+  - condition: result_close_dispute.status_code != 200
+    actions:
+      - type: message
+        message:
+          type: text
+          content: "Due to the following error, the dispute case with the ID <? disputeCaseId ?> could not be closed: <? result_close_dispute.body.error.message ?>"

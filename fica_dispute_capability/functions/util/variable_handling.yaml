@@ -1,0 +1,134 @@
+parameters:
+  - name: scenario
+    optional: true
+  - name: BusinessPartner_ui
+    optional: true
+  - name: currency_ui
+    optional: true
+  - name: BusinessPartner
+    optional: true
+  - name: disputeCaseCurrency
+    optional: true
+  - name: disputeCaseId_ui
+    optional: true
+  - name: disputeCaseId
+    optional: true
+  - name: object_key
+    optional: true
+
+action_groups:
+  - condition: scenario == 'fica_invoices' && currency_ui == null && disputeCaseCurrency == null && BusinessPartner_ui == null && BusinessPartner == null
+    actions:
+      - type: message
+        message:
+          type: text
+          content: "Please provide business partner and currency to fetch invoices in contract accounting"
+  - condition: scenario == 'fica_invoices' && BusinessPartner_ui == null && BusinessPartner == null && (currency_ui != null || disputeCaseCurrency != null)
+    actions:
+      - type: message
+        message:
+          type: text
+          content: "Please provide business partner to fetch invoices in contract accounting"
+  - condition: scenario == 'fica_invoices' && currency_ui == null && disputeCaseCurrency == null && (BusinessPartner_ui != null || BusinessPartner != null)
+    actions:
+      - type: message
+        message:
+          type: text
+          content: "Please provide currency to fetch invoices in contract accounting"
+  - condition: scenario == 'ci_invoices' && BusinessPartner_ui == null && BusinessPartner == null
+    actions:
+      - type: message
+        message:
+          type: text
+          content: "Please provide business partner to fetch invoicing documents in convergent invoicing"
+  - condition: scenario == 'contract_accounts' && BusinessPartner_ui == null && BusinessPartner == null
+    actions:
+      - type: message
+        message:
+          type: text
+          content: "Please provide business partner to fetch contract accounts"
+  - condition: scenario == 'closed_dispute_cases' && BusinessPartner_ui == null && BusinessPartner == null
+    actions:
+      - type: message
+        message:
+          type: text
+          content: "Please provide business partner to fetch completed dispute cases"
+  - condition: scenario == 'fica_open_credits' && currency_ui == null && disputeCaseCurrency == null && BusinessPartner_ui == null && BusinessPartner == null
+    actions:
+      - type: message
+        message:
+          type: text
+          content: "Please provide business partner and currency to fetch open credits in contract accounting"
+  - condition: scenario == 'fica_open_credits' && BusinessPartner_ui == null && BusinessPartner == null && (currency_ui != null || disputeCaseCurrency != null)
+    actions:
+      - type: message
+        message:
+          type: text
+          content: "Please provide business partner to fetch open credits in contract accounting"
+  - condition: scenario == 'fica_open_credits' && currency_ui == null && disputeCaseCurrency == null && (BusinessPartner_ui != null || BusinessPartner != null)
+    actions:
+      - type: message
+        message:
+          type: text
+          content: "Please provide currency to fetch open credits in contract accounting"
+  - condition: scenario == 'ci_open_credits' && BusinessPartner_ui == null && BusinessPartner == null
+    actions:
+      - type: message
+        message:
+          type: text
+          content: "Please provide business partner to fetch open credit memos in convergent invoicing"
+
+  - condition: BusinessPartner_ui != null && BusinessPartner == null
+    actions:
+      - type: set-variables
+        variables:
+          - name: BusinessPartner
+            value: <? BusinessPartner_ui ?>
+  - condition: (scenario == 'fica_invoices' || scenario == 'fica_open_credits') && currency_ui != null && disputeCaseCurrency == null
+    actions:
+      - type: set-variables
+        variables:
+          - name: disputeCaseCurrency
+            value: <? currency_ui ?>
+
+  - condition: scenario == 'void_dispute' && disputeCaseId_ui == null && disputeCaseId == null
+    actions:
+      - type: message
+        message:
+          type: text
+          content: "Please provide dispute case ID to void/reject the dispute case"
+  - condition: scenario == 'close_dispute' && disputeCaseId_ui == null && disputeCaseId == null
+    actions:
+      - type: message
+        message:
+          type: text
+          content: "Please provide dispute case ID to close the dispute case"
+  - condition: scenario == 'dispute_resolution' && disputeCaseId_ui == null && disputeCaseId == null
+    actions:
+      - type: message
+        message:
+          type: text
+          content: "Please provide dispute case ID to resolve the dispute case"
+  - condition: scenario == 'add_case_object' && disputeCaseId_ui == null && disputeCaseId == null
+    actions:
+      - type: message
+        message:
+          type: text
+          content: "Please provide dispute case ID to add <? object_key ?> to the dispute case"
+  - condition: (scenario == 'void_dispute' || scenario == 'close_dispute') && disputeCaseId_ui != null && disputeCaseId == null
+    actions:
+      - type: set-variables
+        variables:
+          - name: disputeCaseId
+            value: <? disputeCaseId_ui ?>
+  - condition: (scenario == 'dispute_resolution' || scenario == 'add_case_object') && disputeCaseId_ui != null && disputeCaseId == null
+    actions:
+      - type: set-variables
+        variables:
+          - name: disputeCaseId
+            value: <? disputeCaseId_ui ?>
+
+result:
+  BusinessPartner: <? BusinessPartner ?>
+  disputeCaseCurrency: <? disputeCaseCurrency ?>
+  disputeCaseId: <? disputeCaseId ?>

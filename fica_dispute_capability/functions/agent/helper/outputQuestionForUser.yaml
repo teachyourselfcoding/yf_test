@@ -1,0 +1,90 @@
+---
+# Output question to user in Joule, show question and quick replies
+parameters:
+  - name: agentQuestionResponseBody
+    optional: false
+  - name: disputeCaseId
+    optional: false
+
+action_groups:
+
+  - actions:
+      - type: set-variables
+        variables:
+          - name: suggestedOption1Title
+            value: "Yes, proceed"
+
+          - name: suggestedOption2Title
+            value: "No, cancel"
+
+          - name: suggestedOption1
+            value: "Yes, continue processing on dispute!"
+
+          - name: suggestedOption2
+            value: "No, process the cancellation of dispute!"
+
+          - name: missingInputDescr
+            value: ""
+
+  - condition: agentQuestionResponseBody?.missingInputs[0]?.description != null
+    actions:
+      - type: set-variables
+        scripting_type: handlebars 
+        variables:
+        - name: missingInputDescr
+          value: "{{remove agentQuestionResponseBody.missingInputs.[0].description '```txt'}}"  # sometimes PAB response adds ```txt markdown, confuses output, so remove it
+      - type: set-variables
+        scripting_type: handlebars 
+        variables:
+        - name: missingInputDescr
+          value: "{{remove missingInputDescr '```'}}"  
+      #- type: set-variables
+      #  scripting_type: handlebars 
+      #  variables:
+      #  - name: missingInputDescr
+      #    value: "{{escape missingInputDescr }}"  # agent response msg can contain values in quotes (") which might break markdown output
+
+  - condition: missingInputDescr != ""
+    actions:
+    # if pab send an descriptions for missing inputs, use them for quick reply question
+      - type: message
+        message: 
+          type: quickReplies
+          content:
+            title: <? missingInputDescr ?>
+            buttons:
+              - title: <? suggestedOption1Title ?>
+                value: <? suggestedOption1 ?>
+              - title: <? suggestedOption2Title ?>
+                value: <? suggestedOption2 ?>
+          markdown: true
+
+  - condition: missingInputDescr == "" && agentQuestionResponseBody?.agentMessage != null
+    actions:
+    # if pab did not send missing inputs descriptions, use agentMessage quick reply question
+      - type: message
+        message: 
+          type: quickReplies
+          content:
+            title: agentQuestionResponseBody?.agentMessage
+            buttons:
+              - title: <? suggestedOption1Title ?>
+                value: <? suggestedOption1 ?>
+              - title: <? suggestedOption2Title ?>
+                value: <? suggestedOption2 ?>
+          markdown: true
+
+  - condition: missingInputDescr == "" && agentQuestionResponseBody?.agentMessage == null
+    # if pab did not send neither missing inputs descriptions nor agentMessage, use generic quick reply question
+    actions:
+      - type: message
+        message: 
+          type: quickReplies
+          content:
+            title: "### <? agentQuestionResponseBody?.agentMessage ?>"
+            buttons:
+              - title: <? suggestedOption1Title ?>
+                value: <? suggestedOption1 ?>
+              - title: <? suggestedOption2Title ?>
+                value: <? suggestedOption2 ?>
+          markdown: true

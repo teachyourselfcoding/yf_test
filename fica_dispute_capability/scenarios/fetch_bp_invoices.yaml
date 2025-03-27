@@ -1,0 +1,28 @@
+description: This function fetches invoices. These invoices are from Contract Accounting (FICA or CA).
+
+slots:
+  - name: BusinessPartner_ui
+    description: Business Partner to fetch invoices.
+  - name: currency_ui
+    description: Currency to fetch invoices.
+
+target:
+  type: function
+  name: disputeCase/fetch_bp_invoices
+  parameters:
+    - name: BusinessPartner
+      value: $capability_context.BusinessPartner
+    - name: disputeCaseCurrency
+      value: $capability_context.disputeCaseCurrency
+    - name: disputeCaseId
+      value: $capability_context.disputeCaseId
+
+visibility_condition:
+  objects:
+    - type: ibn_targets
+      match: ALL
+      intents:
+        - semantic_object: CADisputeCase
+          action: manage
+        - semantic_object: CAContractPartner
+          action: displayFinancialOverview

@@ -1,0 +1,163 @@
+parameters:
+  - name: disputeCaseUUID
+    optional: false
+  - name: disputedCurrency
+    optional: false
+
+action_groups:
+  - actions:
+    # Stage 0: Initialisation and attempt to retrieve system case status of Closed (007)
+    - type: set-variables
+      variables:
+        - name: caseStatusFound
+          value: false
+        - name: disputeNewStatus
+          value: null
+        - name: disputeNewStatusName
+          value: null
+        - name: disputeNewSystemStatus
+          value: null
+        - name: wrappedFunctionResponse
+          value: {
+              "functionName": "set_dispute_case_closed",
+              "isCalled": true,
+              "hasError": false,
+              "messages": [],
+              "errorMessages": []
+            }
+        - name: messages
+          value: []
+        - name: errorMessages
+          value: []
+        - name: hasError
+          value: false
+    - type: api-request
+      method: GET
+      system_alias: S4HANA_PCE_SSO
+      path: "/sap/opu/odata/sap/UI_CADISPUTECASE/I_CACaseStatusVH?$format=json&$filter=CaseSystemStatus%20eq%20%27007%27"
+      result_variable: result_casestatus
+
+  # Stage 1: Retrieval of case status -- Fail (API Error)
+  - condition: result_casestatus.status_code != 200
+    actions:
+      - type: set-variables
+        variables:
+          - name: msg
+            value: "An error occured while retrieving the closed case status type."
+          - name: errorMessages
+            value: <? errorMessages.append(msg) ?>
+          - name: hasError
+            value: true
+      - type: status-update
+        message: <? msg ?>
+
+  # Stage 1: Retrieval of case status -- Fail (Not Found)
+  - condition: result_casestatus.status_code == 200 && result_casestatus.body.d.results.size() == 0
+    actions:
+      - type: set-variables
+        variables:
+          - name: msg
+            value: "No case statuses were found for the system status 'Closed'. Therefore, the dispute case cannot be closed."
+          - name: errorMessages
+            value: <? errorMessages.append(msg) ?>
+          - name: hasError
+            value: true
+      - type: status-update
+        message: <? msg ?>
+
+  # Stage 1: Retrieval of case status -- Success, Attempt to Update Dispute Case
+  - condition: result_casestatus.status_code == 200 && result_casestatus.body.d.results.size() > 0
+    actions:
+      - type: set-variables
+        variables:
+          - name: caseStatusFound
+            value: true
+          - name: closedStatus
+            value: <? result_casestatus.body.d.results[0].CaseStatus ?>
+          - name: msg
+            value: "System status 'Closed' found"
+          - name: messages
+            value: <? messages.append(msg) ?>
+      - type: api-request
+        method: PATCH
+        headers:
+          content-type: application/json
+        system_alias: S4HANA_PCE_SSO
+        path: "/sap/opu/odata4/sap/api_cadisputecase/srvd_a2x/sap/cadisputecase/0001/DisputeCase(<? disputeCaseUUID ?>)"
+        body: { "CaseStatus": "<? closedStatus ?>", "DisputedAmount": 0, "DisputeCaseCurrency": "<? disputedCurrency ?>"}
+        result_variable: result_settoclosed
+
+  # Stage 2: Attempt to update dispute case -- Fail (API Error)
+
+  # Status of dispute case is not 'FOR CHECKING'
+  - condition: caseStatusFound && result_settoclosed.status_code == 400
+    actions:
+      - type: set-variables
+        variables:
+          - name: msg
+            value: "Status of dispute case does not meet the requirement to be close"
+          - name: errorMessages
+            value: <? errorMessages.append(msg) ?>
+
+  # Status of dispute case is already 'CLOSED'
+  - condition: caseStatusFound && result_settoclosed.status_code == 422
+    actions:
+      - type: set-variables
+        variables:
+          - name: msg
+            value: "Cannot close the dispute case as it is already closed."
+          - name: errorMessages
+            value: <? errorMessages.append(msg) ?>
+
+  # All other errors
+  - condition: caseStatusFound && result_settoclosed.status_code != 200 && result_settoclosed.status_code != 400 && result_settoclosed.status_code != 422
+    actions:
+      - type: set-variables
+        variables:
+          - name: msg
+            value: "The dispute case cannot be processed as it cannot be set to Closed status."
+          - name: errorMessages
+            value: <? errorMessages.append(msg) ?>
+          - name: hasError
+            value: true
+      - type: status-update
+        message: <? msg ?>
+
+  # Stage 2: Attempt to update dispute case -- Success
+  - condition: caseStatusFound && result_settoclosed.status_code == 200
+    actions:
+      - type: set-variables
+        variables:
+          - name: disputeNewStatus
+            value: <? result_settoclosed.body.CaseStatus ?>
+          - name: disputeNewStatusName
+            value: <? result_settoclosed.body.CaseStatusName ?>
+          - name: disputeNewSystemStatus
+            value: <? result_settoclosed.body.CaseSystemStatus ?>
+          - name: msg
+            value: "Dispute case successfully closed"
+          - name: messages
+            value: <? messages.append(msg) ?>
+
+  - actions:
+      - type: set-variables
+        scripting_type: handlebars
+        variables:
+          - name: wrappedFunctionResponse
+            value: "{{ setValue wrappedFunctionResponse 'hasError' hasError }}"
+      - type: set-variables
+        scripting_type: handlebars
+        variables:
+          - name: wrappedFunctionResponse
+            value: "{{ setValue wrappedFunctionResponse 'messages' messages }}"
+      - type: set-variables
+        scripting_type: handlebars
+        variables:
+          - name: wrappedFunctionResponse
+            value: "{{ setValue wrappedFunctionResponse 'errorMessages' errorMessages }}"
+
+result:
+  disputeCaseStatus: <? disputeNewStatus ?>
+  disputeCaseStatusName: <? disputeNewStatusName ?>
+  disputeCaseSystemStatus: <? disputeNewSystemStatus ?>
+  wrappedFunctionResponse: <? wrappedFunctionResponse ?>

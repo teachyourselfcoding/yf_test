@@ -1,0 +1,191 @@
+parameters:
+  - name: contractId
+    optional: false
+
+action_groups:
+  - actions:
+    # Stage 0: Initialise values and attempt to get originals
+    - type: set-variables
+      variables:
+        - name: foundOriginals
+          value: false
+        - name: number_of_results
+          value: null
+        - name: contractAttachment
+          value: null
+        - name: wrappedFunctionResponse
+          value: {
+              "functionName": "get_contract_attachment",
+              "isCalled": true,
+              "hasError": false,
+              "messages": [],
+              "errorMessages": []
+            }
+        - name: messages
+          value: []
+        - name: errorMessages
+          value: []
+        - name: hasError
+          value: false
+    - type: set-variables
+      scripting_type: handlebars
+      variables:
+        - name: linkedSapObjectKey
+          value: "{{padding contractId 20 '0'}}"
+    - type: api-request
+      method: GET
+      system_alias: S4HANA_PCE_SSO
+      path: "/sap/opu/odata/sap/API_CV_ATTACHMENT_SRV/GetAllOriginals?LinkedSAPObjectKey='<? linkedSapObjectKey ?>'&BusinessObjectTypeName='CA_BILLCTR'"
+      result_variable: result_originals
+
+  # Stage 1: Get Originals - Fail (API error)
+
+  # Handle s/4 errors
+  - condition: result_originals.status_code == 400
+    actions:
+      - type: set-variables
+        variables:
+          - name: msg
+            value: <? result_originals.body.error.message ?>
+          - name: errorMessages
+            value: <? errorMessages.append(msg) ?>
+          - name: hasError
+            value: true
+
+  - condition: result_originals.status_code != 200 && result_originals.status_code != 400
+    actions:
+      - type: set-variables
+        variables:
+          - name: msg
+            value: "Failed to retrieve originals of attachments for contract <? contractId ?>."
+          - name: errorMessages
+            value: <? errorMessages.append(msg) ?>
+          - name: hasError
+            value: true
+      - type: status-update
+        message: <? msg ?>          
+
+  # Stage 1: Get Originals - Success, set no of results
+  - condition: result_originals.status_code == 200
+    actions:
+      - type: set-variables
+        variables:
+          - name: number_of_results
+            value: <? result_originals.body.d.results.size() ?>
+
+  # Stage 1: Get Originals - Fail (No results)
+  - condition: number_of_results == 0
+    actions:
+      - type: set-variables
+        variables:
+          - name: msg
+            value: "No attachement originals found for the Contract <? contractId ?>."
+          - name: errorMessages
+            value: <? errorMessages.append(msg) ?>
+          - name: hasError
+            value: true
+      - type: status-update
+        message: <? msg ?>          
+
+  # Stage 1: Get Originals - Success and attempt to retrieve attachment
+  - condition: number_of_results != null && number_of_results > 0
+    actions:
+      - type: set-variables
+        variables:
+          - name: foundOriginals
+            value: true
+          - name: number_of_results # We seem to always be taking the first original, so override value to 1
+            value: 1
+          - name: documentInfoRecordDocType
+            value: "<? result_originals.body.d.results[0]?.DocumentInfoRecordDocType ?: '' ?>"
+          - name: documentInfoRecordDocNumber
+            value: "<? result_originals.body.d.results[0]?.DocumentInfoRecordDocNumber ?: '' ?>"
+          - name: documentInfoRecordDocPart
+            value: "<? result_originals.body.d.results[0]?.DocumentInfoRecordDocPart ?: '' ?>"
+          - name: documentInfoRecordDocVersion
+            value: "<? result_originals.body.d.results[0]?.DocumentInfoRecordDocVersion ?: '' ?>"
+          - name: logicalDocument
+            value: "<? result_originals.body.d.results[0]?.LogicalDocument ?: '' ?>"
+          - name: archiveDocumentId
+            value: "<? result_originals.body.d.results[0]?.ArchiveDocumentID ?: '' ?>"
+          - name: linkedSapObjectKey
+            value: "<? result_originals.body.d.results[0]?.LinkedSAPObjectKey ?: '' ?>"
+          - name: msg
+            value: "Found originals for contract attachment"
+          - name: messages
+            value: <? messages.append(msg) ?>
+      - type: api-request
+        method: GET
+        system_alias: S4HANA_PCE_SSO
+        path: "/sap/opu/odata/sap/API_CV_ATTACHMENT_SRV/AttachmentContentSet(DocumentInfoRecordDocType='<? documentInfoRecordDocType ?>',DocumentInfoRecordDocNumber='<? documentInfoRecordDocNumber ?>',DocumentInfoRecordDocPart='<? documentInfoRecordDocPart ?>',DocumentInfoRecordDocVersion='<? documentInfoRecordDocVersion ?>',LogicalDocument='<? logicalDocument ?>',ArchiveDocumentID='<? archiveDocumentId ?>',LinkedSAPObjectKey='<? linkedSapObjectKey ?>',BusinessObjectTypeName='CA_BILLCTR')/$value"
+        result_variable: result_attachment
+
+  # Stage 2: Retrieve attachment - Fail (API error)
+
+  # Handle s/4 errors
+  - condition: foundOriginals && result_originals.status_code == 400
+    actions:
+      - type: set-variables
+        variables:
+          - name: msg
+            value: <? result_originals.body.error.message ?>
+          - name: errorMessages
+            value: <? errorMessages.append(msg) ?>
+          - name: hasError
+            value: true
+
+  - condition: foundOriginals && result_attachment.status_code != 200
+    actions:
+      - type: set-variables
+        variables:
+          - name: msg
+            value: "Failed to retrieve attachment for Contract <? contractId ?>."
+          - name: errorMessages
+            value: <? errorMessages.append(msg) ?>
+          - name: hasError
+            value: true
+      - type: status-update
+        message: <? msg ?>          
+
+  # Stage 2: Retrieve attachment - Success
+  - condition: foundOriginals && result_attachment.status_code == 200
+    actions:
+      - type: set-variables
+        variables:
+          - name: mimeType
+            value: "<? result_attachment.headers['content-type'][0] ?>"
+          - name: prefix
+            value: "contractAttachment/"
+          - name: name
+            value: "<? result_attachment.headers['content-disposition'][0].split('filename=')[1] ?>"
+          - name: attachmentContent
+            value: "<? result_attachment.body ?>"
+          - name: contractAttachment
+            value: "<? {name: prefix.append(name), base64Content: attachmentContent } ?>"
+          - name: msg
+            value: "Successfully retrieved contract attachment"
+          - name: messages
+            value: <? messages.append(msg) ?>
+
+  - actions:
+      - type: set-variables
+        scripting_type: handlebars
+        variables:
+          - name: wrappedFunctionResponse
+            value: "{{ setValue wrappedFunctionResponse 'hasError' hasError }}"
+      - type: set-variables
+        scripting_type: handlebars
+        variables:
+          - name: wrappedFunctionResponse
+            value: "{{ setValue wrappedFunctionResponse 'messages' messages }}"
+      - type: set-variables
+        scripting_type: handlebars
+        variables:
+          - name: wrappedFunctionResponse
+            value: "{{ setValue wrappedFunctionResponse 'errorMessages' errorMessages }}"
+
+result:
+  status_code: "<? result_originals.status_code == 200 ? result_attachment.status_code : result_originals.status_code ?>"
+  number_of_results: "<? result_attachment.status_code == 200 ? number_of_results : null ?>"
+  value: <? contractAttachment ?>
+  wrappedFunctionResponse: <? wrappedFunctionResponse ?>

@@ -1,0 +1,117 @@
+parameters:
+  - name: disputeCaseUUID
+    optional: false
+  - name: disputeCaseId
+    optional: false
+
+action_groups:
+  - actions:
+      - type: set-variables
+        variables:
+          - name: number_of_results
+            value: null
+          - name: dispute_notes
+            value: null
+          - name: wrappedFunctionResponse
+            value: {
+              "functionName": "create_dispute_case_note",
+              "isCalled": true,
+              "hasError": false,
+              "messages": [],
+              "errorMessages": []
+            }
+          - name: messages
+            value: []
+          - name: errorMessages
+            value: []
+          - name: hasError
+            value: false
+      - type: api-request
+        method: GET
+        system_alias: S4HANA_PCE_SSO
+        path: "/sap/opu/odata4/sap/api_cadisputecase/srvd_a2x/sap/cadisputecase/0001/DisputeCase/<? disputeCaseUUID ?>/SAP__self.RetrieveNote(CaseNoteCreatedByUser='')"
+        result_variable: result_dispute_notes
+
+  # Handle s/4 errors
+  - condition: result_dispute_notes.status_code == 400
+    actions:
+      - type: set-variables
+        variables:
+          - name: errorMessages
+            value: "The provided dispute case UUID is invalid."
+          - name: hasError
+            value: true
+
+  - condition: result_dispute_notes.status_code != 200 && result_dispute_notes.status_code != 400
+    actions:
+      - type: set-variables
+        variables:
+          - name: msg
+            value: "Internal Server Error"
+          - name: errorMessages
+            value: <? errorMessages.append(msg) ?>
+          - name: hasError
+            value: true
+      - type: message
+        scripting_type: handlebars
+        message:
+          type: illustrated_message
+          content:
+            illustration_name: "Connection"
+            title: "An error occurred while retrieving the dispute case notes."
+            subtitle: "Please try again later."
+
+  - condition: result_dispute_notes.status_code == 200
+    actions:
+      - type: set-variables
+        variables:
+          - name: number_of_results
+            value: <? result_dispute_notes.body.value.size() ?>
+
+  - condition: number_of_results == 0
+    actions:
+      - type: set-variables
+        variables:
+          - name: msg
+            value: "There was no dispute notes found for the dispute case with the ID <? disputeCaseId ?>."
+          - name: messages
+            value: <? messages.append(msg) ?>
+      - type: status-update
+        message: <? msg ?>          
+
+  - condition: number_of_results != null && number_of_results > 0
+    actions:
+      - type: set-variables
+        variables:
+          - name: msg
+            value: "Retrieved <? number_of_results ?> notes attached to the dispute case with the ID <? disputeCaseId ?>"
+          - name: messages
+            value: <? messages.append(msg) ?>
+      - type: set-variables
+        scripting_type: handlebars
+        variables:
+          - name: dispute_notes
+            value: "{{#eachJoin result_dispute_notes.body.value}} {{this.CaseNoteText}} {{/eachJoin}}"
+
+  - actions:
+      - type: set-variables
+        scripting_type: handlebars
+        variables:
+          - name: wrappedFunctionResponse
+            value: "{{ setValue wrappedFunctionResponse 'hasError' hasError }}"
+      - type: set-variables
+        scripting_type: handlebars
+        variables:
+          - name: wrappedFunctionResponse
+            value: "{{ setValue wrappedFunctionResponse 'messages' messages }}"
+      - type: set-variables
+        scripting_type: handlebars
+        variables:
+          - name: wrappedFunctionResponse
+            value: "{{ setValue wrappedFunctionResponse 'errorMessages' errorMessages }}"
+
+result:
+  status_code: <? result_dispute_notes.status_code ?>
+  number_of_results: <? number_of_results ?>
+  value: <? dispute_notes ?>
+  wrappedFunctionResponse: <? wrappedFunctionResponse ?>

@@ -1,0 +1,26 @@
+description: This function fetches open credits for a Business Partner. These open credits are from Contract Accounting (FICA or CA).
+
+slots:
+  - name: BusinessPartner_ui
+    description: Business Partner to fetch open credits in Contract Accounting.
+  - name: currency_ui
+    description: Currency to fetch open credits in Contract Accounting.
+
+target:
+  type: function
+  name: disputeCase/fetch_fica_open_credits
+  parameters:
+    - name: BusinessPartner
+      value: $capability_context.BusinessPartner
+    - name: disputeType
+      value: $capability_context.disputeType
+    - name: disputeCaseCurrency
+      value: $capability_context.disputeCaseCurrency
+
+visibility_condition:
+  objects:
+    - type: ibn_targets
+      match: ALL
+      intents:
+        - semantic_object: CADisputeCase
+          action: manage

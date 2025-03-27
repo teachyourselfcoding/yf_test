@@ -1,0 +1,259 @@
+parameters:
+  - name: disputeCaseId
+
+action_groups:
+  - actions:
+
+    #DEBUG output - !disable inside util/debug_msg.yaml!
+    - type: dialog-function 
+      name: agent/helper/debug_msg
+      parameters:
+        - name: message
+          value: "Agent invoked Joule Dialog Function: agent/agentTools/fetch_dispute_case_data" 
+    #//DEBUG output -
+
+    # Stage 1: Get dispute details and initialise values to null if fail, or proper values if success
+    - type: set-variables
+      variables:
+        - name: foundDisputeCase
+          value: false
+        - name: foundInvoiceId
+          value: false
+        - name: foundContractId
+          value: false
+        - name: invoiceId
+          value: null
+        - name: contractId
+          value: null
+        - name: invoiceLineItems
+          value: null
+        - name: disputeNotes
+          value: null
+        - name: disputeAttachments
+          value: null
+        - name: attachmentList
+          value: null
+        - name: wrappedFunctionResponse
+          value: {
+            "calledFunctionName": "fetch_dispute_case_data",
+            "innerFunctions": [
+              {
+                "functionName": "get_dispute_details",
+                "isCalled": false
+              },
+              {
+                "functionName": "create_dispute_case_note",
+                "isCalled": false
+              },
+              {
+                "functionName": "get_dispute_attachments",
+                "isCalled": false
+              },
+              {
+                "functionName": "get_invoice_id",
+                "isCalled": false
+              },
+              {
+                "functionName": "get_invoice_line_items",
+                "isCalled": false
+              },
+              {
+                "functionName": "get_contract_attachment",
+                "isCalled": false
+              }
+            ]
+          }
+    - type: dialog-function
+      name: agent/util/get_dispute_details
+      parameters:
+        - name: disputeCaseId
+          value: <? disputeCaseId ?>
+      result_variable: dispute_details
+    - type: set-variables
+      scripting_type: handlebars
+      variables:
+        - name: wrappedFunctionResponse
+          value: "{{ setValue wrappedFunctionResponse 'innerFunctions[0]' dispute_details.wrappedFunctionResponse }}"
+    - type: set-variables
+      variables:
+        - name: disputeType
+          value: "<? dispute_details.value != null ? dispute_details.value.CADisputeType : null ?>"
+        - name: caseUUID
+          value: "<? dispute_details.value != null ? dispute_details.value.CaseUUID : null ?>"
+        - name: disputedAmount
+          value: "<? dispute_details.value != null ? dispute_details.value.DisputedAmount : null ?>"
+        - name: disputeCaseCurrency
+          value: "<? dispute_details.value != null ? dispute_details.value.DisputeCaseCurrency : null ?>"
+        - name: disputeStatus
+          value: "<? dispute_details.value != null ? dispute_details.value.CaseSystemStatus : null ?>"
+        - name: disputeTypeText
+          value: "<? dispute_details.value != null ? dispute_details.value.CADisputeTypeText : null ?>"
+        - name: caseStatusText
+          value: "<? dispute_details.value != null ? dispute_details.value.CaseStatusName : null ?>"
+
+  # Stage 1: Get dispute details -- Fail
+  - condition: dispute_details.number_of_results == null || dispute_details.number_of_results == 0
+    actions:
+      - type: status-update
+        message: "No data found for Dispute case <? disputeCaseId ?>"
+
+  # Stage 1: Get dispute details -- Success, Proceed to fetch invoiceId
+  - condition: dispute_details.number_of_results != null && dispute_details.number_of_results > 0
+    actions:
+      - type: set-variables
+        variables:
+          - name: foundDisputeCase
+            value: true
+      - type: dialog-function
+        name: agent/util/get_invoice_id
+        parameters:
+          - name: disputeCaseUUID
+            value: <? caseUUID ?>
+          - name: disputeCaseId
+            value: <? disputeCaseId ?>
+        result_variable: get_invoice_id_result
+
+      - type: set-variables
+        scripting_type: handlebars
+        variables:
+          - name: wrappedFunctionResponse
+            value: "{{ setValue wrappedFunctionResponse 'innerFunctions[1]' get_invoice_id_result.wrappedFunctionResponse }}"
+
+      - type: set-variables
+        variables:
+          - name: invoiceId
+            value: <? get_invoice_id_result.value ?>
+
+  # Stage 2a: Read invoice lineitems
+  - condition: foundDisputeCase && invoiceId != null && invoiceId != ""
+    actions:
+      - type: set-variables
+        variables:
+          - name: foundInvoiceId
+            value: true
+      - type: dialog-function
+        name: agent/util/get_invoice_line_items
+        parameters:
+          - name: invoiceId
+            value: <? invoiceId ?>
+        result_variable: invoice_data
+      - type: set-variables
+        scripting_type: handlebars
+        variables:
+          - name: wrappedFunctionResponse
+            value: "{{ setValue wrappedFunctionResponse 'innerFunctions[2]' invoice_data.wrappedFunctionResponse }}"
+      - type: set-variables
+        variables:
+          - name: contractId
+            value: "<? invoice_data.value != null ? invoice_data.value.contractId : null ?>"
+
+  # Stage 2a: Read invoice lineitems - Fail
+  - condition: foundInvoiceId && invoice_data.value == null
+    actions:
+      - type: status-update
+        message: "Unable to read data for Invoice ID <? invoiceId ?>"    
+
+  # Stage 2a: Read invoice lineitems - Success, Proceed to fetch notes, and attachments
+  - condition: foundInvoiceId && invoice_data.value != null
+    actions:
+      - type: set-variables
+        variables:
+          - name: invoiceLineItems
+            value: <? invoice_data.value ?>
+      - type: status-update
+        message: "I have fetched <? invoice_data.number_of_results ?> invoice line items for Invoice <? invoiceId ?>."
+
+      - type: dialog-function
+        name: agent/util/get_dispute_notes
+        parameters:
+          - name: disputeCaseUUID
+            value: <? caseUUID ?>
+          - name: disputeCaseId
+            value: <? disputeCaseId ?>
+        result_variable: result_dispute_notes
+
+      - type: set-variables
+        scripting_type: handlebars
+        variables:
+          - name: wrappedFunctionResponse
+            value: "{{ setValue wrappedFunctionResponse 'innerFunctions[3]' result_dispute_notes.wrappedFunctionResponse }}"
+
+      - type: dialog-function
+        name: agent/util/get_dispute_attachments
+        parameters:
+          - name: disputeCaseUUID
+            value: <? caseUUID ?>
+          - name: disputeCaseId
+            value: <? disputeCaseId ?>
+        result_variable: result_dispute_attachments
+
+      - type: set-variables
+        scripting_type: handlebars
+        variables:
+          - name: wrappedFunctionResponse
+            value: "{{ setValue wrappedFunctionResponse 'innerFunctions[4]' result_dispute_attachments.wrappedFunctionResponse }}"
+
+      - type: set-variables
+        variables:
+          - name: disputeNotes
+            value: <? result_dispute_notes.value ?> # value is null if there is an error
+          - name: disputeAttachments
+            value: <? result_dispute_attachments.value ?>
+
+  # Stage 2b: Read contract attachment
+  - condition: foundDisputeCase && contractId != null && contractId != ""
+    actions:
+      - type: set-variables
+        variables:
+          - name: foundContractId
+            value: true
+      - type: dialog-function
+        name: agent/util/get_contract_attachment
+        parameters:
+          - name: contractId
+            value: <? contractId ?>
+        result_variable: contract_attachment
+
+      - type: set-variables
+        scripting_type: handlebars
+        variables:
+          - name: wrappedFunctionResponse
+            value: "{{ setValue wrappedFunctionResponse 'innerFunctions[5]' contract_attachment.wrappedFunctionResponse }}"
+
+  # Stage 2b: Read contract attachment - Fail
+  - condition: foundContractId && contract_attachment.value == null
+    actions:
+      - type: status-update
+        message: "Unable to read contract attachment for Contract <? contractId ?>"    
+
+  # Stage 2b: Read contract attachment - Success
+  - condition: foundContractId && contract_attachment.value != null
+    actions:
+      - type: set-variables
+        scripting_type: spel
+        variables:
+          - name: attachmentList
+            value: >
+              [
+                <? contract_attachment.value ?>
+              ]
+      - type: set-variables
+        variables:
+          - name: placeholder
+            value: >
+              "<? disputeAttachments != null ? attachmentList.addAll(disputeAttachments) : null ?>"
+      - type: status-update
+        message: "I have fetched the contract attachment for Contract <? contractId ?>."              
+
+result:
+  mimeType: "application/pdf"
+  metadata:
+    disputedAmount: <? disputedAmount ?>
+    disputeCaseCurrency: <? disputeCaseCurrency ?>
+    contractId: <? contractId ?>
+    invoiceId: <? invoiceId ?>
+    invoiceLineItems: <? invoiceLineItems ?>
+    disputeStatus: <? disputeStatus ?>
+    disputeNotes: <? disputeNotes ?>
+  data: <? attachmentList ?>
+  wrappedFunctions: <? wrappedFunctionResponse ?>

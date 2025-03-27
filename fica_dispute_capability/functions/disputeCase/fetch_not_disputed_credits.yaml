@@ -1,0 +1,99 @@
+parameters:
+  - name: caseUUID
+    optional: true
+  - name: disputeType
+    optional: true
+
+action_groups:
+  - condition: disputeType == 'A002' #A002 Incorrect Credit
+    actions:
+      - type: api-request
+        method: GET
+        system_alias: S4HANA_PCE_SSO
+        path: /sap/opu/odata/sap/UI_CADISPUTECASE/C_CADisputeCaseTP(CaseUUID=guid'<? caseUUID ?>',IsActiveEntity=true)/to_NotDisCreditMemo?$select=CADocumentNumber%2cCAMainTransaction%2cCAMainTransactionName%2cCASubTransaction%2cCASubTransactionName%2cCANetDueDate%2cCADeferralDate%2cCAClearingDate%2cCAClearingReasonName%2cOpenAmountInTransCrcy%2cTransactionCurrency%2cCAAmountInTransactionCurrency%2cCreationDateTime&$format=json
+        result_variable: result_notdispcredits
+      - type: set-variables
+        variables:
+          - name: disp_text
+            value: "Credit Memo"
+
+  - condition: disputeType == 'A003' #A003 Missing Credit
+    actions:
+      - type: api-request
+        method: GET
+        system_alias: S4HANA_PCE_SSO
+        path: /sap/opu/odata/sap/UI_CADISPUTECASE/C_CADisputeCaseTP(CaseUUID=guid'<? caseUUID ?>',IsActiveEntity=true)/to_NotDisCredit?&$select=CADocumentNumber%2cCreationDateTime%2cCAAmountInTransactionCurrency%2cTransactionCurrency%2cCreationTime%2cCreationDate&$format=json
+        result_variable: result_notdispcredits
+      - type: set-variables
+        variables:
+          - name: disp_text
+            value: "Credit Memo"
+
+  - condition: disputeType == 'B001' #B001 Missing Payment
+    actions:
+      - type: api-request
+        method: GET
+        system_alias: S4HANA_PCE_SSO
+        path: /sap/opu/odata/sap/UI_CADISPUTECASE/C_CADisputeCaseTP(CaseUUID=guid'<? caseUUID ?>',IsActiveEntity=true)/to_NotDisPayment?$select=CAClearingDocumentNumber%2cCAPaymentLot%2cCAPaymentLotItem%2cCreationDateTime%2cCAAmountInTransactionCurrency%2cTransactionCurrency&$format=json
+        result_variable: result_notdispcredits
+      - type: set-variables
+        variables:
+          - name: disp_text
+            value: "Payment"
+
+  - condition: result_notdispcredits.status_code == 200 && result_notdispcredits.body.d.results.size() != 0
+    actions:
+      - type: message
+        scripting_type: handlebars
+        message: >
+          {
+            "type": "list",
+            "content": {
+                "title": "Select the {{disp_text}} to be assigned",
+                "enableDetailView": false,
+                "elements": [
+                  {{#eachJoin result_notdispcredits.body.d.results}}
+                    {
+                      {{#if CAClearingDocumentNumber}}
+                        "title": "Payment: {{CAClearingDocumentNumber}}",
+                      {{else}}
+                        "title": "Credit Memo: {{CADocumentNumber}}",
+                      {{/if}}
+                      "description": "Amount in transaction currency: {{CAAmountInTransactionCurrency}}{{ TransactionCurrency }} \nCreation Date Time: {{formatDate 'YYYY-MM-DD' CreationDateTime}}",
+                      "buttons": [
+                        {
+                          "type": "postback",
+                          {{#if CAClearingDocumentNumber}}
+                            "title": "Assign Payment",
+                            "text": "Assign payment to dispute case with object type CA_PAYINFO and object key {{CAClearingDocumentNumber}}",
+                            "value": "Add case object (payment) to dispute case with object type CA_PAYINFO and object key {{CAClearingDocumentNumber}}"
+                          {{else}}
+                            "title": "Assign Credit Memo",
+                            "text": "Assign credit memo to dispute case with object type CA_CREDINF and object key {{CADocumentNumber}}",
+                            "value": "Add case object (credit memo) to dispute case with object type CA_CREDINF and object key {{CADocumentNumber}}"
+                          {{/if}}
+                        }
+                      ]
+                    }
+                  {{/eachJoin}}
+                ]
+            }
+          }
+
+  - condition: result_notdispcredits.status_code == 200 && result_notdispcredits.body.d.results.size() == 0
+    actions:
+      - type: message
+        message:
+          type: text
+          content: "No <? disp_text ?> that can be assigned to the dispute case could be found."
+
+  - condition: result_notdispcredits.status_code != 200
+    actions:
+      - type: message
+        scripting_type: handlebars
+        message:
+          type: illustrated_message
+          content:
+            illustration_name: "Connection"
+            title: "An error occured while fetching data."
+            subtitle: "Please try again later."

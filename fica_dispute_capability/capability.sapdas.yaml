@@ -1,0 +1,15 @@
+schema_version: '3.13.0-beta'
+
+metadata:
+  namespace: com.sap.s4hana.pcp.trans
+  name: trans_fica_dispute_agent_capability
+  version: 1.0.0
+  display_name: "Transactional FI-CA Dispute Management Capability - Agentic"
+  description: >-
+    This capability helps in verification and resolution of FI-CA disputes.
+
+system_aliases:
+  S4HANA_PCE_SSO:
+    destination: S4HANA_PCE_SSO
+  APIAGENTCALLBACK:
+    destination: AC_callback_api
