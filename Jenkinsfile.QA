@@ -1,0 +1,23 @@
+#!/usr/bin/env groovy
+@Library(['piper-lib', 'piper-lib-os', 'pcp-joule-cicd-lib']) _
+
+pipeline {
+    agent any
+    options {
+        skipDefaultCheckout(true)
+    }
+    parameters {
+        choice(name: 'Test_Type', choices: ['@smokeTest', '@devTest'], description: 'Select the test type')
+        string(name: 'Digital_Assistant_Name', defaultValue: 'sap_digital_assistant', description: 'Enter a name for the DA')
+    }
+
+    stages {
+        stage('Prepare Pipeline') {
+            steps {
+                script {
+                    joulePipelineQA(testType: params.Test_Type, daname: params.Digital_Assistant_Name)
+                }
+            }
+        }
+    }
+}

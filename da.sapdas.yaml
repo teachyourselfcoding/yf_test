@@ -1,0 +1,15 @@
+schema_version: 1.2.0
+name: trans_fica_dispute_capability
+capabilities:
+  - type: local
+    folder: ./fica_dispute_capability
+conversational_search:
+  enabled: true
+  product_filter:
+    - SAP_S4HANA_CLOUD_PE
+systems:
+  - system_name: sxw920
+    system_type: sap.s4pce
+    deployment_identifiers:
+      - ppmsProductVersionRelease: ['2023']
+      - ppmsProductVersionSupportPackage: ['01']
